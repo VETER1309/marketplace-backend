@@ -419,20 +419,20 @@ async function scanNftBlock(api, admin, blockNum) {
 
         // Buy call
         if (data.startsWith("0x15d62801")) {
-          const withdrawNFTEvent = findMatcherEvent(allRecords, extrinsicIndex, abi, 'WithdrawNFT');
-          const withdrawQuoteMatchedEvent = findMatcherEvent(allRecords, extrinsicIndex, abi, 'WithdrawQuoteMatched');
+          const withdrawNFTEvent = findMatcherEvent(allRecords, abi, extrinsicIndex, 'WithdrawNFT');
+          const withdrawQuoteMatchedEvent = findMatcherEvent(allRecords, abi, extrinsicIndex, 'WithdrawQuoteMatched');
           await handleBuyCall(api, admin, withdrawNFTEvent, withdrawQuoteMatchedEvent);
         }
 
         // Cancel: 0x9796e9a703000000000000000100000000000000
         if (data.startsWith("0x9796e9a7")) {
-          const withdrawNFTEvent = findMatcherEvent(allRecords, extrinsicIndex, abi, 'WithdrawNFT');
+          const withdrawNFTEvent = findMatcherEvent(allRecords, abi, extrinsicIndex, 'WithdrawNFT');
           await handleCancelCall(api, admin, withdrawNFTEvent);
         }
 
         // Withdraw: 0x410fcc9d020000000000000000407a10f35a00000000000000000000
         if (data.startsWith("0x410fcc9d")) {
-          const withdrawQuoteUnusedEvent = findMatcherEvent(allRecords, extrinsicIndex, abi, 'WithdrawQuoteUnused');
+          const withdrawQuoteUnusedEvent = findMatcherEvent(allRecords, abi, extrinsicIndex, 'WithdrawQuoteUnused');
           await handleWithdrawCall(withdrawQuoteUnusedEvent);
         }
 
