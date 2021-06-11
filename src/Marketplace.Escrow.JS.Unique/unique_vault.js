@@ -343,22 +343,18 @@ async function scanNftBlock(api, admin, blockNum) {
 
   // log(`Reading Block ${blockNum} Transactions`);
 
-  // collect successful extrinsics
-  let successfulExtrinsics = [];
-  signedBlock.block.extrinsics.forEach((ex, index) => {
+  for (let [extrinsicIndex, ex] of signedBlock.block.extrinsics.entries()) {
     const events = allRecords
-    .filter(({ phase }) =>
-      phase.isApplyExtrinsic &&
-      phase.asApplyExtrinsic.eq(index)
-    )
-    .map(({ event }) => `${event.section}.${event.method}`);
+      .filter(({ phase }) =>
+        phase.isApplyExtrinsic &&
+        phase.asApplyExtrinsic.eq(extrinsicIndex)
+      )
+      .map(({ event }) => `${event.section}.${event.method}`);
 
-    if (events.includes('system.ExtrinsicSuccess')) {
-      successfulExtrinsics.push(ex);
+    // skip unsuccessful  extrinsics.
+    if (!events.includes('system.ExtrinsicSuccess')) {
+      continue;
     }
-  });
-
-  for (let [extrinsicIndex, ex] of successfulExtrinsics.entries()) {
 
     const { _isSigned, _meta, method: { args, method, section } } = ex;
 
