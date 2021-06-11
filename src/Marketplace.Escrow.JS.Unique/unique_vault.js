@@ -37,7 +37,7 @@ let resolver = null;
 function delay(ms) {
   return new Promise(async (resolve, reject) => {
     resolver = resolve;
-    timer = setTimeout(() => { 
+    timer = setTimeout(() => {
       resolver = null;
       resolve();
     }, ms);
@@ -83,7 +83,7 @@ async function addIncomingNFTTransaction(address, collectionId, tokenId, blockNu
   // Convert address into public key
   const publicKey = Buffer.from(decodeAddress(address), 'binary').toString('base64');
 
-  await conn.query(`INSERT INTO public."${incomingTxTable}"("Id", "CollectionId", "TokenId", "Value", "OwnerPublicKey", "UniqueProcessedBlockId", "Status", "LockTime", "ErrorMessage") VALUES ($1, $2, $3, 0, $4, $5, 0, now(), '');`, 
+  await conn.query(`INSERT INTO public."${incomingTxTable}"("Id", "CollectionId", "TokenId", "Value", "OwnerPublicKey", "UniqueProcessedBlockId", "Status", "LockTime", "ErrorMessage") VALUES ($1, $2, $3, 0, $4, $5, 0, now(), '');`,
     [uuidv4(), collectionId, tokenId, publicKey, blockNumber]);
 }
 
@@ -91,7 +91,7 @@ async function setIncomingNftTransactionStatus(id, status, error = "OK") {
   const conn = await getDbConnection();
 
   // Get one non-processed Kusama transaction
-  await conn.query(`UPDATE public."${incomingTxTable}" SET "Status" = $1, "ErrorMessage" = $2 WHERE "Id" = $3`, 
+  await conn.query(`UPDATE public."${incomingTxTable}" SET "Status" = $1, "ErrorMessage" = $2 WHERE "Id" = $3`,
     [status, error, id]);
 }
 
@@ -99,10 +99,10 @@ async function getIncomingNFTTransaction() {
   const conn = await getDbConnection();
 
   // Get one non-processed incoming NFT transaction
-  // Id | CollectionId | TokenId | Value | OwnerPublicKey | Status | LockTime | ErrorMessage | UniqueProcessedBlockId  
-  const res = await conn.query(`SELECT * FROM public."${incomingTxTable}" 
-    WHERE 
-      "Status" = 0 
+  // Id | CollectionId | TokenId | Value | OwnerPublicKey | Status | LockTime | ErrorMessage | UniqueProcessedBlockId
+  const res = await conn.query(`SELECT * FROM public."${incomingTxTable}"
+    WHERE
+      "Status" = 0
   `);
 
   let nftTx = {
@@ -128,7 +128,7 @@ async function getIncomingNFTTransaction() {
       setIncomingNftTransactionStatus(res.rows[0].Id, 2, e.toString());
       log(e, "ERROR");
     }
-    
+
   }
 
   return nftTx;
@@ -141,8 +141,8 @@ async function addOffer(seller, collectionId, tokenId, quoteId, price) {
   const publicKey = Buffer.from(decodeAddress(seller), 'binary').toString('base64');
 
   //Id | CreationDate | CollectionId | TokenId | Price | Seller | Metadata | OfferStatus | SellerPublicKeyBytes | QuoteId
-  await conn.query(`INSERT INTO public."${offerTable}"("Id", "CreationDate", "CollectionId", "TokenId", "Price", "Seller", "Metadata", "OfferStatus", "SellerPublicKeyBytes", "QuoteId") 
-    VALUES ($1, now(), $2, $3, $4, $5, '', 1, $6, $7);`, 
+  await conn.query(`INSERT INTO public."${offerTable}"("Id", "CreationDate", "CollectionId", "TokenId", "Price", "Seller", "Metadata", "OfferStatus", "SellerPublicKeyBytes", "QuoteId")
+    VALUES ($1, now(), $2, $3, $4, $5, '', 1, $6, $7);`,
     [uuidv4(), collectionId, tokenId, price, publicKey, decodeAddress(seller), quoteId]);
 }
 
@@ -170,8 +170,8 @@ async function addTrade(offerId, buyer) {
   // Convert address into public key
   const publicKey = Buffer.from(decodeAddress(buyer), 'binary').toString('base64');
 
-  await conn.query(`INSERT INTO public."${tradeTable}"("Id", "TradeDate", "Buyer", "OfferId") 
-    VALUES ($1, now(), $2, $3);`, 
+  await conn.query(`INSERT INTO public."${tradeTable}"("Id", "TradeDate", "Buyer", "OfferId")
+    VALUES ($1, now(), $2, $3);`,
     [uuidv4(), publicKey, offerId]);
 }
 
@@ -184,8 +184,8 @@ async function addOutgoingQuoteTransaction(quoteId, amount, recipient, withdrawT
   // Id | Status | ErrorMessage | Value | QuoteId | RecipientPublicKey | WithdrawType
   // WithdrawType == 1 => Withdraw matched
   //                 0 => Unused
-  await conn.query(`INSERT INTO public."${outgoingQuoteTxTable}"("Id", "Status", "ErrorMessage", "Value", "QuoteId", "RecipientPublicKey", "WithdrawType") 
-    VALUES ($1, 0, '', $2, $3, $4, $5);`, 
+  await conn.query(`INSERT INTO public."${outgoingQuoteTxTable}"("Id", "Status", "ErrorMessage", "Value", "QuoteId", "RecipientPublicKey", "WithdrawType")
+    VALUES ($1, 0, '', $2, $3, $4, $5);`,
     [uuidv4(), amount, parseInt(quoteId), publicKey, withdrawType]);
 }
 
@@ -193,7 +193,7 @@ async function setIncomingKusamaTransactionStatus(id, status, error = "OK") {
   const conn = await getDbConnection();
 
   // Get one non-processed Kusama transaction
-  await conn.query(`UPDATE public."${incomingQuoteTxTable}" SET "Status" = $1, "ErrorMessage" = $2 WHERE "Id" = $3`, 
+  await conn.query(`UPDATE public."${incomingQuoteTxTable}" SET "Status" = $1, "ErrorMessage" = $2 WHERE "Id" = $3`,
     [status, error, id]);
 }
 
@@ -202,9 +202,9 @@ async function getIncomingKusamaTransaction() {
 
   // Get one non-processed incoming Kusama transaction
   // Id | Amount | QuoteId | Description | AccountPublicKey | BlockId | Status | LockTime | ErrorMessage
-  const res = await conn.query(`SELECT * FROM public."${incomingQuoteTxTable}" 
-    WHERE 
-      "Status" = 0 
+  const res = await conn.query(`SELECT * FROM public."${incomingQuoteTxTable}"
+    WHERE
+      "Status" = 0
       AND "QuoteId" = 2 LIMIT 1
   `);
 
@@ -223,7 +223,7 @@ async function getIncomingKusamaTransaction() {
 
       // Convert public key into address
       const address = encodeAddress(hexToU8a(publicKey));
-      
+
       ksmTx.id = res.rows[0].Id;
       ksmTx.sender = address;
       ksmTx.amount = res.rows[0].Amount;
@@ -232,7 +232,7 @@ async function getIncomingKusamaTransaction() {
       setIncomingKusamaTransactionStatus(res.rows[0].Id, 2, e.toString());
       log(e, "ERROR");
     }
-    
+
   }
 
   return ksmTx;
@@ -245,7 +245,7 @@ function getTransactionStatus(events, status) {
   }
   if (status.isBroadcast) {
     return "NotReady";
-  } 
+  }
   if (status.isInBlock || status.isFinalized) {
     if(events.filter(e => e.event.data.method === 'ExtrinsicFailed').length > 0) {
       return "Fail";
@@ -454,11 +454,11 @@ async function handleBuyCall(api, admin, withdrawNFTEvent, withdrawQuoteMatchedE
   log(`--- Event 1: ${withdrawNFTEvent.event.identifier}`);
   const buyerAddress = withdrawNFTEvent.args[0].toString();
   log(`NFT Buyer address: ${buyerAddress}`);
-  const collectionId = withdrawNFTEvent.args[1]; 
+  const collectionId = withdrawNFTEvent.args[1];
   log(`collectionId = ${collectionId.toString()}`);
-  const tokenId = withdrawNFTEvent.args[2]; 
+  const tokenId = withdrawNFTEvent.args[2];
   log(`tokenId = ${tokenId.toString()}`);
-  
+
   // WithdrawQuoteMatched
   log(`--- Event 2: ${withdrawQuoteMatchedEvent.event.identifier}`);
   const sellerAddress = withdrawQuoteMatchedEvent.args[0].toString();
@@ -492,9 +492,9 @@ async function handleCancelCall(api, admin, event) {
   log(`--- Event 1: ${event.event.identifier}`);
   const sellerAddress = event.args[0];
   log(`NFT Seller address: ${sellerAddress.toString()}`);
-  const collectionId = event.args[1]; 
+  const collectionId = event.args[1];
   log(`collectionId = ${collectionId.toString()}`);
-  const tokenId = event.args[2]; 
+  const tokenId = event.args[2];
   log(`tokenId = ${tokenId.toString()}`);
 
 
@@ -527,9 +527,9 @@ async function handleWithdrawCall(event) {
 
 function findMatcherEvent(allRecords, abi, extrinsicIndex, eventName) {
   return allRecords
-    .filter(r => 
-      r.event.method.toString() === 'ContractEmitted' 
-      && r.phase.isApplyExtrinsic 
+    .filter(r =>
+      r.event.method.toString() === 'ContractEmitted'
+      && r.phase.isApplyExtrinsic
       && r.phase.asApplyExtrinsic.toNumber() === extrinsicIndex
       && r.event.data[0]
       && r.event.data[0].toString() === config.marketContractAddress
@@ -569,7 +569,7 @@ async function handleUnique() {
       try {
         if (blockNum <= bestBlockNumber) {
           await addHandledUniqueBlock(blockNum);
-          
+
           // Handle NFT Deposits (by analysing block transactions)
           await scanNftBlock(api, admin, blockNum);
         } else break;
