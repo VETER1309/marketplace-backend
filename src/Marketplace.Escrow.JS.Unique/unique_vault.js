@@ -5,6 +5,7 @@ const { decodeAddress, encodeAddress } = require('@polkadot/util-crypto');
 const config = require('./config');
 const { v4: uuidv4 } = require('uuid');
 const { connect, log } = require('./lib');
+const returnTokensStuckDueTo463 = require('./return_tokens_stuck_due_to_463');
 
 var BigNumber = require('bignumber.js');
 BigNumber.config({ DECIMAL_PLACES: 12, ROUNDING_MODE: BigNumber.ROUND_DOWN, decimalSeparator: '.' });
@@ -63,6 +64,12 @@ async function getDbConnection() {
     log("Connected to the DB");
   }
   return dbClient;
+}
+
+function createContract(api) {
+  const abi = new Abi(contractAbi);
+  const contract = new ContractPromise(api, abi, config.marketContractAddress);
+  return contract;
 }
 
 async function getLastHandledUniqueBlock() {
@@ -285,8 +292,7 @@ function sendTransactionAsync(sender, transaction) {
 async function registerQuoteDepositAsync(api, sender, depositorAddress, amount) {
   log(`${depositorAddress} deposited ${amount} in ${quoteId} currency`);
 
-  const abi = new Abi(contractAbi);
-  const contract = new ContractPromise(api, abi, config.marketContractAddress);
+  const contract = createContract(api);
 
   const value = 0;
   const maxgas = 1000000000000;
@@ -298,8 +304,7 @@ async function registerQuoteDepositAsync(api, sender, depositorAddress, amount) 
 
 async function registerNftDepositAsync(api, sender, depositorAddress, collection_id, token_id) {
   log(`${depositorAddress} deposited ${collection_id}, ${token_id}`);
-  const abi = new Abi(contractAbi);
-  const contract = new ContractPromise(api, abi, config.marketContractAddress);
+  const contract = createContract(api);
 
   const value = 0;
   const maxgas = 1000000000000;
@@ -545,11 +550,8 @@ async function subscribeToBlocks(api) {
   });
 }
 
-async function handleUnique() {
+async function handleUnique(api, admin) {
 
-  const api = await connect(config);
-  const keyring = new Keyring({ type: 'sr25519' });
-  const admin = keyring.addFromUri(config.adminSeed);
   adminAddress = admin.address.toString();
   log(`Escrow admin address: ${adminAddress}`);
 
@@ -625,7 +627,11 @@ async function handleUnique() {
 }
 
 async function main() {
-  await handleUnique();
+  const api = await connect(config);
+  const keyring = new Keyring({ type: 'sr25519' });
+  const admin = keyring.addFromUri(config.adminSeed);
+  await returnTokensStuckDueTo463(api, await getDbConnection(), createContract(api), admin, await getLastHandledUniqueBlock());
+  //await handleUnique(api, admin);
 }
 
 main().catch(console.error).finally(() => process.exit());
