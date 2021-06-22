@@ -1,13 +1,15 @@
-const { ApiPromise, WsProvider, Keyring } = require('@polkadot/api');
-const { Abi, ContractPromise } = require("@polkadot/api-contract");
 const { hexToU8a } = require('@polkadot/util');
 const { decodeAddress, encodeAddress } = require('@polkadot/util-crypto');
 const config = require('./config');
 const { v4: uuidv4 } = require('uuid');
-const { connect, log } = require('./lib');
-
-var BigNumber = require('bignumber.js');
-BigNumber.config({ DECIMAL_PLACES: 12, ROUNDING_MODE: BigNumber.ROUND_DOWN, decimalSeparator: '.' });
+const { log, BigNumber } = require('./lib');
+const {createUniqueClient,
+  EXTRINSIC_TYPE_ADMIN_RECEIVED_TOKEN,
+  EXTRINSIC_TYPE_ASK_CONTRACT_CALL,
+  EXTRINSIC_TYPE_BUY_CONTRACT_CALL,
+  EXTRINSIC_TYPE_CANCEL_CONTRACT_CALL,
+  EXTRINSIC_TYPE_WITHDRAW_CONTRACT_CALL
+} = require('./unique');
 
 const { Client } = require('pg');
 let dbClient = null;
@@ -21,8 +23,6 @@ const outgoingTxTable = "NftOutgoingTransaction";
 const uniqueBlocksTable = "UniqueProcessedBlock";
 let adminAddress;
 
-const rtt = require("./runtime_types.json");
-const contractAbi = require("./market_metadata.json");
 
 const quoteId = 2; // KSM
 
@@ -245,239 +245,96 @@ async function getIncomingKusamaTransaction() {
   return ksmTx;
 }
 
-
-function getTransactionStatus(events, status) {
-  if (status.isReady) {
-    return "NotReady";
-  }
-  if (status.isBroadcast) {
-    return "NotReady";
-  }
-  if (status.isInBlock || status.isFinalized) {
-    if(events.filter(e => e.event.data.method === 'ExtrinsicFailed').length > 0) {
-      return "Fail";
-    }
-    if(events.filter(e => e.event.data.method === 'ExtrinsicSuccess').length > 0) {
-      return "Success";
-    }
-  }
-
-  return "Fail";
-}
-
-function sendTransactionAsync(sender, transaction) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      let unsub = await transaction.signAndSend(sender, ({ events = [], status }) => {
-        const transactionStatus = getTransactionStatus(events, status);
-
-        if (transactionStatus === "Success") {
-          log(`Transaction successful`);
-          resolve(events);
-          unsub();
-        } else if (transactionStatus === "Fail") {
-          log(`Something went wrong with transaction. Status: ${status}`);
-          reject(events);
-          unsub();
-        }
-      });
-    } catch (e) {
-      log('Error: ' + e.toString(), "ERROR");
-      reject(e);
-    }
-  });
-
-}
-
-async function registerQuoteDepositAsync(api, sender, depositorAddress, amount) {
-  log(`${depositorAddress} deposited ${amount} in ${quoteId} currency`);
-
-  const abi = new Abi(contractAbi);
-  const contract = new ContractPromise(api, abi, config.marketContractAddress);
-
-  const value = 0;
-  const maxgas = 1000000000000;
-
-  let amountBN = new BigNumber(amount);
-  const tx = contract.tx.registerDeposit(value, maxgas, quoteId, amountBN.toString(), depositorAddress);
-  await sendTransactionAsync(sender, tx);
-}
-
-async function registerNftDepositAsync(api, sender, depositorAddress, collection_id, token_id) {
-  log(`${depositorAddress} deposited ${collection_id}, ${token_id}`);
-  const abi = new Abi(contractAbi);
-  const contract = new ContractPromise(api, abi, config.marketContractAddress);
-
-  const value = 0;
-  const maxgas = 1000000000000;
-
-  // if (blackList.includes(token_id)) {
-  //   log(`Blacklisted NFT received. Silently returning.`, "WARNING");
-  //   return;
-  // }
-
-  const tx = contract.tx.registerNftDeposit(value, maxgas, collection_id, token_id, depositorAddress);
-  await sendTransactionAsync(sender, tx);
-}
-
-function beHexToNum(beHex) {
-  const arr = hexToU8a(beHex);
-  let strHex = '';
-  for (let i=arr.length-1; i>=0; i--) {
-    let digit = arr[i].toString(16);
-    if (arr[i] <= 15) digit = '0' + digit;
-    strHex += digit;
-  }
-  return new BigNumber(strHex, 16);
-}
-
-async function sendNftTxAsync(api, sender, recipient, collection_id, token_id) {
-  const tx = api.tx.nft
-    .transfer(recipient, collection_id, token_id, 0);
-  await sendTransactionAsync(sender, tx);
-}
-
-function isSuccessfulExtrinsic(eventRecords, extrinsicIndex) {
-  const events = eventRecords
-    .filter(({ phase }) =>
-      phase.isApplyExtrinsic &&
-      phase.asApplyExtrinsic.eq(extrinsicIndex)
-    )
-    .map(({ event }) => `${event.section}.${event.method}`);
-
-  return events.includes('system.ExtrinsicSuccess');
-
-}
-
-async function scanNftBlock(api, admin, blockNum) {
+async function scanNftBlock(uniqueClient, blockNum) {
 
   if (blockNum % 10 == 0) log(`Scanning Block #${blockNum}`);
-  const blockHash = await api.rpc.chain.getBlockHash(blockNum);
 
-  // Memo: If it fails here, check custom types
-  const signedBlock = await api.rpc.chain.getBlock(blockHash);
-  const allRecords = await api.query.system.events.at(blockHash);
-
-  const abi = new Abi(contractAbi);
+  const {
+    blockHash,
+    signedBlock,
+    events
+  } = await uniqueClient.readBlock(blockNum);
 
   // log(`Reading Block ${blockNum} Transactions`);
 
   for (let [extrinsicIndex, ex] of signedBlock.block.extrinsics.entries()) {
-
-    // skip unsuccessful  extrinsics.
-    if (!isSuccessfulExtrinsic(allRecords, extrinsicIndex)) {
-      continue;
-    }
-
-    const { _isSigned, _meta, method: { args, method, section } } = ex;
-
-    if ((section == "nft") && (method == "transfer") && (args[0] == admin.address.toString())) {
-      log(`NFT deposit from ${ex.signer.toString()} id (${args[1]}, ${args[2]})`, "RECEIVED");
-
-      const address = ex.signer.toString();
-      const collectionId = args[1];
-      const tokenId = args[2];
-
-      // Save in the DB
-      await addIncomingNFTTransaction(address, collectionId, tokenId, blockNum);
-    }
-    else if ((section == "contracts") && (method == "call") && (args[0].toString() == config.marketContractAddress)) {
-      try {
-        log(`Contract call in block ${blockNum}: ${args[0].toString()}, ${args[1].toString()}, ${args[2].toString()}, ${args[3].toString()}`);
-
-        let data = args[3].toString();
-        log(`data = ${data}`);
-
-        // Quote Deposit registration
-        // 0x5eb1cb1f02000000000000000080c6a47e8d03000000000000000000f2536430fd61850d86660508a278f2cd5f7258ea1c1cf9491c5d848327c98121
-
-        // Buy 3457 (0D81):
-        // Block hash:   0x3a88c2efd7d7131f43f7771c3e50a98cd90cf9b1e8b83ed890207f98ea93495a
-        // Block number: 1,384,383
-        // Data:         0x261a70280400000000000000810d000000000000
-
-        // Withdraw NFT/Amount
-        // 0xb3f7898ecbda75ddf8f6cea3f584c9c46fb0fe7fbb645804c89261014b78ff22
-        // 1,384,398
-        // 0xe80efa690400000000000000860f0000…88e769c8628cc58d53fbe7f6fbc52b3e
-
-        // Register NFT 4744 (0x1288 = 8812 LE) deposit
-        // 0xe80efa6904000000000000008812000000000000d81f689c5d4aef49114017168ed953595ead394faa5acfd8877702693157620a
-
-
-        // Ask call
-        if (data.startsWith("0x020f741e")) {
-          log(`======== Ask Call`);
-          //    CallID   collection       token            quote            price
-          // 0x 020f741e 0300000000000000 1200000000000000 0200000000000000 0080c6a47e8d03000000000000000000
-          //    0        4                12               20               28
-
-          if (data.substring(0,2) === "0x") data = data.substring(2);
-          const collectionIdHex = "0x" + data.substring(8, 24);
-          const tokenIdHex = "0x" + data.substring(24, 40);
-          const quoteIdHex = "0x" + data.substring(40, 56);
-          const priceHex = "0x" + data.substring(56);
-          const collectionId = beHexToNum(collectionIdHex).toString();
-          const tokenId = beHexToNum(tokenIdHex).toString();
-          const quoteId = beHexToNum(quoteIdHex).toString();
-          const price = beHexToNum(priceHex).toString();
-          log(`${ex.signer.toString()} listed ${collectionId}-${tokenId} in block ${blockNum} hash: ${blockHash} for ${quoteId}-${price}`);
-
-          await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price);
-        }
-
-        // Buy call
-        if (data.startsWith("0x15d62801")) {
-          const withdrawNFTEvent = findMatcherEvent(allRecords, abi, extrinsicIndex, 'WithdrawNFT');
-          const withdrawQuoteMatchedEvent = findMatcherEvent(allRecords, abi, extrinsicIndex, 'WithdrawQuoteMatched');
-          await handleBuyCall(api, admin, withdrawNFTEvent, withdrawQuoteMatchedEvent);
-        }
-
-        // Cancel: 0x9796e9a703000000000000000100000000000000
-        if (data.startsWith("0x9796e9a7")) {
-          const withdrawNFTEvent = findMatcherEvent(allRecords, abi, extrinsicIndex, 'WithdrawNFT');
-          await handleCancelCall(api, admin, withdrawNFTEvent);
-        }
-
-        // Withdraw: 0x410fcc9d020000000000000000407a10f35a00000000000000000000
-        if (data.startsWith("0x410fcc9d")) {
-          const withdrawQuoteUnusedEvent = findMatcherEvent(allRecords, abi, extrinsicIndex, 'WithdrawQuoteUnused');
-          await handleWithdrawCall(withdrawQuoteUnusedEvent);
-        }
-
+    try {
+      const parsedExtrinsic = uniqueClient.parseExtrinsic(ex, extrinsicIndex, events, blockNum);
+      if(!parsedExtrinsic) {
+        continue;
       }
-      catch (e) {
-        log(e, "ERROR");
+
+      switch (parsedExtrinsic.type) {
+        case EXTRINSIC_TYPE_ADMIN_RECEIVED_TOKEN: {
+          await handleIncomintNftTx(parsedExtrinsic, blockNum);
+          break;
+        }
+        case EXTRINSIC_TYPE_ASK_CONTRACT_CALL: {
+          await handleAskCall(ex, parsedExtrinsic, blockNum, blockHash);
+          break;
+        }
+        case EXTRINSIC_TYPE_BUY_CONTRACT_CALL: {
+          await handleBuyCall(uniqueClient, parsedExtrinsic);
+          break;
+        }
+        case EXTRINSIC_TYPE_CANCEL_CONTRACT_CALL: {
+          await handleCancelCall(uniqueClient, parsedExtrinsic);
+          break;
+        }
+        case EXTRINSIC_TYPE_WITHDRAW_CONTRACT_CALL: {
+          await handleWithdrawCall(parsedExtrinsic);
+          break;
+        }
       }
+
+    }
+    catch (e) {
+      log(e, "ERROR");
     }
   }
 }
 
-async function handleBuyCall(api, admin, withdrawNFTEvent, withdrawQuoteMatchedEvent) {
-  if(!withdrawNFTEvent) {
-    throw `Couldn't find WithdrawNFT event in Buy call`;
-  }
-  if(!withdrawQuoteMatchedEvent) {
-    throw `Couldn't find WithdrawQuoteMatched event in Buy call`;
-  }
+async function handleIncomintNftTx(tx, blockNum) {
+  const {
+    address,
+    collectionId,
+    tokenId
+  } = tx;
+  log(`NFT deposit from ${tx.address.toString()} id (${collectionId}, ${tokenId})`, "RECEIVED");
 
+  // Save in the DB
+  await addIncomingNFTTransaction(address, collectionId, tokenId, blockNum);
+}
+
+async function handleAskCall(ex, askTx, blockNum, blockHash){
+  log(`======== Ask Call`);
+  const {
+    collectionId,
+    tokenId,
+    quoteId,
+    price
+  } = askTx;
+
+  log(`${ex.signer.toString()} listed ${collectionId}-${tokenId} in block ${blockNum} hash: ${blockHash} for ${quoteId}-${price}`);
+
+  await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price);
+}
+
+async function handleBuyCall(uniqueClient, buyTx) {
+  const {
+    buyerAddress,
+    collectionId,
+    tokenId,
+    sellerAddress,
+    quoteId,
+    price
+  } = buyTx;
   log(`======== Buy call`);
 
-  // WithdrawNFT
-  log(`--- Event 1: ${withdrawNFTEvent.event.identifier}`);
-  const buyerAddress = withdrawNFTEvent.args[0].toString();
   log(`NFT Buyer address: ${buyerAddress}`);
-  const collectionId = withdrawNFTEvent.args[1];
   log(`collectionId = ${collectionId.toString()}`);
-  const tokenId = withdrawNFTEvent.args[2];
   log(`tokenId = ${tokenId.toString()}`);
-
-  // WithdrawQuoteMatched
-  log(`--- Event 2: ${withdrawQuoteMatchedEvent.event.identifier}`);
-  const sellerAddress = withdrawQuoteMatchedEvent.args[0].toString();
   log(`NFT Seller address: ${sellerAddress}`);
-  const quoteId = withdrawQuoteMatchedEvent.args[1].toNumber();
-  const price = withdrawQuoteMatchedEvent.args[2].toString();
   log(`Price: ${quoteId} - ${price.toString()}`);
 
   // Update offer to done (status = 3 = Traded)
@@ -490,24 +347,20 @@ async function handleBuyCall(api, admin, withdrawNFTEvent, withdrawQuoteMatchedE
   await addOutgoingQuoteTransaction(quoteId, price.toString(), sellerAddress, 1);
 
   // Execute NFT transfer to buyer
-  await sendNftTxAsync(api, admin, buyerAddress.toString(), collectionId, tokenId);
-
+  await uniqueClient.sendNftTxAsync(buyerAddress.toString(), collectionId, tokenId);
 }
 
-async function handleCancelCall(api, admin, event) {
-  if(!event) {
-    throw `Couldn't find WithdrawNFT event in Cancel call`;
-  }
-
+async function handleCancelCall(uniqueClient, cancelTx) {
   log(`======== Cancel call`);
 
+  const {
+    sellerAddress,
+    collectionId,
+    tokenId
+  } = cancelTx;
   // WithdrawNFT
-  log(`--- Event 1: ${event.event.identifier}`);
-  const sellerAddress = event.args[0];
   log(`NFT Seller address: ${sellerAddress.toString()}`);
-  const collectionId = event.args[1];
   log(`collectionId = ${collectionId.toString()}`);
-  const tokenId = event.args[2];
   log(`tokenId = ${tokenId.toString()}`);
 
 
@@ -515,61 +368,34 @@ async function handleCancelCall(api, admin, event) {
   await updateOffer(collectionId.toString(), tokenId.toString(), 2);
 
   // Execute NFT transfer back to seller
-  await sendNftTxAsync(api, admin, sellerAddress.toString(), collectionId, tokenId);
+  await uniqueClient.sendNftTxAsync(sellerAddress.toString(), collectionId, tokenId);
 }
 
-async function handleWithdrawCall(event) {
-  if(!event) {
-    throw `Couldn't find WithdrawQuoteUnused event in Withdraw call`;
-  }
-
+async function handleWithdrawCall(withdrawTx) {
   log(`======== Withdraw call`);
+  const {
+    withdrawerAddress,
+    quoteId,
+    price
+  } = withdrawTx;
 
-  // WithdrawQuoteUnused
   log(`--- Event 1: ${event.event.identifier}`);
-  const withdrawerAddress = event.args[0];
   log(`Withdrawing address: ${withdrawerAddress.toString()}`);
-  const quoteId = parseInt(event.args[1].toString());
-  const price = event.args[2].toString();
   log(`Price: ${quoteId} - ${price.toString()}`);
 
   // Record outgoing quote tx
   await addOutgoingQuoteTransaction(quoteId, price.toString(), withdrawerAddress, 0);
-
 }
 
-function findMatcherEvent(allRecords, abi, extrinsicIndex, eventName) {
-  return allRecords
-    .filter(r =>
-      r.event.method.toString() === 'ContractEmitted'
-      && r.phase.isApplyExtrinsic
-      && r.phase.asApplyExtrinsic.toNumber() === extrinsicIndex
-      && r.event.data[0]
-      && r.event.data[0].toString() === config.marketContractAddress
-    )
-    .map(r => abi.decodeEvent(r.event.data[1]))
-    .filter(r => r.event.identifier === eventName)[0];
-}
-
-async function subscribeToBlocks(api) {
-  await api.rpc.chain.subscribeNewHeads((header) => {
-    bestBlockNumber = header.number;
-    cancelDelay();
-  });
+function onNewBlock(header) {
+  bestBlockNumber = header.number;
+  cancelDelay();
 }
 
 async function handleUnique() {
+  const uniqueClient = await createUniqueClient(config);
 
-  const api = await connect(config);
-  const keyring = new Keyring({ type: 'sr25519' });
-  const admin = keyring.addFromUri(config.adminSeed);
-  adminAddress = admin.address.toString();
-  log(`Escrow admin address: ${adminAddress}`);
-
-  // await scanNftBlock(api, admin, 415720);
-  // return;
-
-  await subscribeToBlocks(api);
+  await uniqueClient.subscribeToBlocks(onNewBlock);
 
   // Work indefinitely
   while (true) {
@@ -584,7 +410,7 @@ async function handleUnique() {
           await addHandledUniqueBlock(blockNum);
 
           // Handle NFT Deposits (by analysing block transactions)
-          await scanNftBlock(api, admin, blockNum);
+          await scanNftBlock(uniqueClient, blockNum);
         } else break;
 
       } catch (ex) {
@@ -603,7 +429,7 @@ async function handleUnique() {
         deposit = true;
 
         try {
-          await registerNftDepositAsync(api, admin, nftTx.sender, nftTx.collectionId, nftTx.tokenId);
+          await uniqueClient.registerNftDepositAsync(nftTx.sender, nftTx.collectionId, nftTx.tokenId);
           await setIncomingNftTransactionStatus(nftTx.id, 1);
           log(`NFT deposit from ${nftTx.sender} id (${nftTx.collectionId}, ${nftTx.tokenId})`, "REGISTERED");
         } catch (e) {
@@ -621,7 +447,7 @@ async function handleUnique() {
         deposit = true;
 
         try {
-          await registerQuoteDepositAsync(api, admin, ksmTx.sender, ksmTx.amount);
+          await uniqueClient.registerQuoteDepositAsync(ksmTx.sender, ksmTx.amount);
           await setIncomingKusamaTransactionStatus(ksmTx.id, 1);
           log(`Quote deposit from ${ksmTx.sender} amount ${ksmTx.amount.toString()}`, "REGISTERED");
         } catch (e) {

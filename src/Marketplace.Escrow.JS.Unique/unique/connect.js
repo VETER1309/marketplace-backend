@@ -1,5 +1,5 @@
 const { ApiPromise, WsProvider } = require('@polkadot/api');
-const log = require('./log');
+const { log } = require('../lib');
 const rtt = require("../runtime_types.json");
 
 
@@ -9,7 +9,7 @@ module.exports = async function (config) {
   const wsProvider = new WsProvider(config.wsEndpoint);
 
   // Create the API and wait until ready
-  const api = new ApiPromise({ 
+  const api = new ApiPromise({
     provider: wsProvider,
     types: rtt
   });
