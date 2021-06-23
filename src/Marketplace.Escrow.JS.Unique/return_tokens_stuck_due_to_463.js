@@ -42,8 +42,7 @@ async function rehandleBlock(api, admin, blockNum, tokens, updateOffer, sendToke
   const blockHash = await api.rpc.chain.getBlockHash(blockNum);
 
   // Memo: If it fails here, check custom types
-  const signedBlock = await api.rpc.chain.getBlock(blockHash);
-  const allRecords = await api.query.system.events.at(blockHash);
+  const [signedBlock, allRecords] = await Promise.all([api.rpc.chain.getBlock(blockHash), api.query.system.events.at(blockHash)]);
 
   const abi = new Abi(contractAbi);
 
@@ -218,11 +217,16 @@ async function returnTokensStuckDueTo463(api, dbConnection, contract, admin, las
 ${logLines.join('\n')}`, 'INFO');
 
     const firstBlock = Math.min(...tokens.map(t => t.UniqueProcessedBlockId));
+    let tokensLength = tokens.length;
 
     for(let i = firstBlock; i < lastHandledBlock; i++) {
       tokens = await rehandleBlock(api, admin, i, tokens, updateOfferMock, sendTokenMock, addTradeMock, addOutgoingQuoteTransactionMock);
       if(tokens.length === 0) {
         break;
+      }
+      if(tokens.length < tokensLength) {
+        i = Math.max(i, Math.min(...tokens.map(t => t.UniqueProcessedBlockId)) - 1);
+        tokensLength = tokens.length;
       }
     }
 
