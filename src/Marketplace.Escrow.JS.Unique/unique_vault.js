@@ -630,8 +630,7 @@ async function handleUnique() {
             api,            
             userAddress: ksmTx.sender,
             sender: admin,
-            marketContractAddress: config.marketContractAddress,
-            amount: ksmTx.amount
+            marketContractAddress: config.marketContractAddress            
           };
           // Add sender to contract white list
           await addWhiteList(paraments);
