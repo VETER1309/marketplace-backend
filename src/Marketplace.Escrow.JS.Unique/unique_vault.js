@@ -10,11 +10,7 @@ const {createUniqueClient,
   EXTRINSIC_TYPE_CANCEL_CONTRACT_CALL,
   EXTRINSIC_TYPE_WITHDRAW_CONTRACT_CALL
 } = require('./unique');
-const { connect, log } = require('./lib');
 const fs = require('fs');
-
-var BigNumber = require('bignumber.js');
-BigNumber.config({ DECIMAL_PLACES: 12, ROUNDING_MODE: BigNumber.ROUND_DOWN, decimalSeparator: '.' });
 
 const { Client } = require('pg');
 let dbClient = null;
@@ -26,9 +22,6 @@ const tradeTable = "Trade";
 const outgoingQuoteTxTable = "QuoteOutgoingTransaction";
 // const outgoingTxTable = "NftOutgoingTransaction";
 const uniqueBlocksTable = "UniqueProcessedBlock";
-let adminAddress;
-
-const quoteId = 2; // KSM
 
 let bestBlockNumber = 0; // The highest block in chain (not final)
 let timer;
@@ -397,7 +390,6 @@ async function handleWithdrawCall(withdrawTx) {
     price
   } = withdrawTx;
 
-  log(`--- Event 1: ${event.event.identifier}`);
   log(`Withdrawing address: ${withdrawerAddress.toString()}`);
   log(`Price: ${quoteId} - ${price.toString()}`);
 

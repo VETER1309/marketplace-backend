@@ -54,7 +54,7 @@ class AdminPool {
       let freeAdminIndex = 0;
       do {
         freeAdminIndex = this.nextIndex();
-      } while(!this.isAdminUsed[freeAdminIndex]);
+      } while(this.isAdminUsed[freeAdminIndex]);
 
       return Promise.resolve(freeAdminIndex);
     }
@@ -64,3 +64,5 @@ class AdminPool {
     }).then(() => this.findFreeAdmin());
   }
 }
+
+module.exports = AdminPool;

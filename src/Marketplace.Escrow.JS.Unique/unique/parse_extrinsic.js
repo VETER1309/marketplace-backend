@@ -7,13 +7,13 @@ const EXTRINSIC_TYPE_BUY_CONTRACT_CALL = 'BUY_CONTRACT_CALL';
 const EXTRINSIC_TYPE_CANCEL_CONTRACT_CALL = 'CANCEL_CONTRACT_CALL';
 const EXTRINSIC_TYPE_WITHDRAW_CONTRACT_CALL = 'WITHDRAW_CONTRACT_CALL';
 
-function parseExtrinsic(extrinsic, extrinsicIndex, events, matcherAddress, abi, admin, blockNum) {
+function parseExtrinsic(extrinsic, extrinsicIndex, events, matcherAddress, abi, adminAddress, blockNum) {
   if(!isSuccessfulExtrinsic(events, extrinsicIndex)) {
     return undefined;
   }
 
   const { _isSigned, _meta, method: { args, method, section } } = extrinsic;
-  if ((section == "nft") && (method == "transfer") && (args[0] == admin.address.toString())) {
+  if ((section == "nft") && (method == "transfer") && (args[0] == adminAddress)) {
     const address = extrinsic.signer.toString();
     const collectionId = args[1];
     const tokenId = args[2];
@@ -199,5 +199,6 @@ module.exports = {
   EXTRINSIC_TYPE_ADMIN_RECEIVED_TOKEN,
   EXTRINSIC_TYPE_ASK_CONTRACT_CALL,
   EXTRINSIC_TYPE_BUY_CONTRACT_CALL,
-  EXTRINSIC_TYPE_CANCEL_CONTRACT_CALL
+  EXTRINSIC_TYPE_CANCEL_CONTRACT_CALL,
+  EXTRINSIC_TYPE_WITHDRAW_CONTRACT_CALL
 }

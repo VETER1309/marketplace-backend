@@ -1,9 +1,12 @@
-const { log } = require('../lib');
+const { log, BigNumber } = require('../lib');
 const connect = require('./connect');
 const { Abi, ContractPromise } = require("@polkadot/api-contract");
 const contractAbi = require("../market_metadata.json");
 const { Keyring } = require('@polkadot/api');
 const {parseExtrinsic, ...types} = require('./parse_extrinsic');
+const AdminPool = require('./admin_pool');
+
+const quoteId = 2; // KSM
 
 function getTransactionStatus(events, status) {
   if (status.isReady) {
@@ -51,34 +54,25 @@ function sendTransactionAsync(sender, transaction) {
 async function createUniqueClient(config) {
   const api = await connect(config);
 
-  return {
-    registerQuoteDepositAsync: (depositorAddress, amount) => registerQuoteDepositAsync(api, admin, depositorAddress, amount, matcherAddress),
-    registerNftDepositAsync: (depositorAddress, collection_id, token_id) => registerNftDepositAsync(api, admin, depositorAddress, collection_id, token_id, matcherAddress),
-  };
+  const keyring = new Keyring({ type: 'sr25519' });
+
+  const mainAdmin = keyring.addFromUri(config.adminSeed);
+  adminAddress = mainAdmin.address.toString();
+  log(`Escrow admin address: ${adminAddress}`);
+
+  const otherAdmins = config.additionalAdminSeeds.map(a => keyring.addFromUri(a));
+  log('Additional admins addresses');
+  for(let a of otherAdmins) {
+    log(a.address.toString());
+  }
+
+  const adminsPool = new AdminPool(mainAdmin, otherAdmins);
+
+  return new UniqueClient(api, config, adminsPool, mainAdmin.address.toString());
 }
 
 class UniqueClient {
-  async static create(config) {
-    const api = await connect(config);
-
-    const keyring = new Keyring({ type: 'sr25519' });
-
-    const mainAdmin = keyring.addFromUri(config.adminSeed);
-    adminAddress = admin.address.toString();
-    log(`Escrow admin address: ${adminAddress}`);
-
-    const otherAdmins = config.additionalAdminSeeds.map(a => keyring.addFromUri(a));
-    log('Additional admins addresses');
-    for(let a of otherAdmins) {
-      log(a.address.toString());
-    }
-
-    const adminsPool = new AdminPool(mainAdmin, otherAdmins);
-
-    return new UniqueClient(api, config, adminsPool);
-  }
-
-  constructor(api, config, adminsPool) {
+  constructor(api, config, adminsPool, adminAddress) {
     this.api = api;
 
     this.adminsPool = adminsPool;
@@ -86,6 +80,7 @@ class UniqueClient {
     this.abi = new Abi(contractAbi);
     this.matcherAddress = config.marketContractAddress;
     this.useWhiteLists = config.whiteList;
+    this.adminAddress = adminAddress;
   }
 
   async subscribeToBlocks(onNewBlock) {
@@ -107,7 +102,7 @@ class UniqueClient {
   }
 
   parseExtrinsic(extrinsic, extrinsicIndex, events, blockNum) {
-    return parseExtrinsic(extrinsic, extrinsicIndex, events, this.matcherAddress, this.abi, this.admin, blockNum);
+    return parseExtrinsic(extrinsic, extrinsicIndex, events, this.matcherAddress, this.abi, this.adminAddress, blockNum);
   }
 
   async sendNftTxAsync(recipient, collection_id, token_id, admin) {
