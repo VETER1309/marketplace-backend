@@ -47,83 +47,103 @@ function sendTransactionAsync(sender, transaction) {
   });
 }
 
-async function registerQuoteDepositAsync(api, sender, depositorAddress, amount, matcherAddress) {
-  log(`${depositorAddress} deposited ${amount} in ${quoteId} currency`);
-
-  const abi = new Abi(contractAbi);
-  const contract = new ContractPromise(api, abi, matcherAddress);
-
-  const value = 0;
-  const maxgas = 1000000000000;
-
-  let amountBN = new BigNumber(amount);
-  const tx = contract.tx.registerDeposit(value, maxgas, quoteId, amountBN.toString(), depositorAddress);
-  await sendTransactionAsync(sender, tx);
-}
-
-async function registerNftDepositAsync(api, sender, depositorAddress, collection_id, token_id, matcherAddress) {
-  log(`${depositorAddress} deposited ${collection_id}, ${token_id}`);
-  const abi = new Abi(contractAbi);
-  const contract = new ContractPromise(api, abi, matcherAddress);
-
-  const value = 0;
-  const maxgas = 1000000000000;
-
-  // if (blackList.includes(token_id)) {
-  //   log(`Blacklisted NFT received. Silently returning.`, "WARNING");
-  //   return;
-  // }
-
-  const tx = contract.tx.registerNftDeposit(value, maxgas, collection_id, token_id, depositorAddress);
-  await sendTransactionAsync(sender, tx);
-}
-
-async function sendNftTxAsync(api, recipient, collection_id, token_id, admin) {
-  const tx = api.tx.nft
-    .transfer(recipient, collection_id, token_id, 0);
-  await sendTransactionAsync(admin, tx);
-}
-
-async function subscribeToBlocks(api, onNewBlock) {
-  await api.rpc.chain.subscribeNewHeads((header) => {
-    onNewBlock(header);
-  });
-}
-
-async function readBlock(api, blockNumber) {
-  const blockHash = await api.rpc.chain.getBlockHash(blockNumber);
-
-  // Memo: If it fails here, check custom types
-  const [signedBlock, events] = await Promise.all([api.rpc.chain.getBlock(blockHash), api.query.system.events.at(blockHash)]);
-  return {
-    signedBlock,
-    blockHash,
-    events
-  };
-}
 
 async function createUniqueClient(config) {
   const api = await connect(config);
 
-  const keyring = new Keyring({ type: 'sr25519' });
-
-  const admin = keyring.addFromUri(config.adminSeed);
-  adminAddress = admin.address.toString();
-  log(`Escrow admin address: ${adminAddress}`);
-
-
-  const abi = new Abi(contractAbi);
-  const matcherAddress = config.marketContractAddress;
-
-
   return {
-    subscribeToBlocks: (onNewBlock) => subscribeToBlocks(api, onNewBlock),
-    readBlock: (blockNumber) => readBlock(api, blockNumber),
-    parseExtrinsic: (extrinsic, extrinsicIndex, events, blockNum) => parseExtrinsic(extrinsic, extrinsicIndex, events, matcherAddress, abi, admin, blockNum),
-    sendNftTxAsync: (recipient, collection_id, token_id) => sendNftTxAsync(api, recipient, collection_id, token_id, admin),
     registerQuoteDepositAsync: (depositorAddress, amount) => registerQuoteDepositAsync(api, admin, depositorAddress, amount, matcherAddress),
     registerNftDepositAsync: (depositorAddress, collection_id, token_id) => registerNftDepositAsync(api, admin, depositorAddress, collection_id, token_id, matcherAddress),
   };
+}
+
+class UniqueClient {
+  async static create(config) {
+    const api = await connect(config);
+
+    const keyring = new Keyring({ type: 'sr25519' });
+
+    const mainAdmin = keyring.addFromUri(config.adminSeed);
+    adminAddress = admin.address.toString();
+    log(`Escrow admin address: ${adminAddress}`);
+
+    const otherAdmins = config.additionalAdminSeeds.map(a => keyring.addFromUri(a));
+    log('Additional admins addresses');
+    for(let a of otherAdmins) {
+      log(a.address.toString());
+    }
+
+    const adminsPool = new AdminPool(mainAdmin, otherAdmins);
+
+    return new UniqueClient(api, config, adminsPool);
+  }
+
+  constructor(api, config, adminsPool) {
+    this.api = api;
+
+    this.adminsPool = adminsPool;
+
+    this.abi = new Abi(contractAbi);
+    this.matcherAddress = config.marketContractAddress;
+  }
+
+  async subscribeToBlocks(onNewBlock) {
+    await this.api.rpc.chain.subscribeNewHeads((header) => {
+      onNewBlock(header);
+    });
+  }
+
+  async readBlock(blockNumber) {
+    const blockHash = await this.api.rpc.chain.getBlockHash(blockNumber);
+
+    // Memo: If it fails here, check custom types
+    const [signedBlock, events] = await Promise.all([this.api.rpc.chain.getBlock(blockHash), this.api.query.system.events.at(blockHash)]);
+    return {
+      signedBlock,
+      blockHash,
+      events
+    };
+  }
+
+  parseExtrinsic(extrinsic, extrinsicIndex, events, blockNum) {
+    return parseExtrinsic(extrinsic, extrinsicIndex, events, this.matcherAddress, this.abi, this.admin, blockNum);
+  }
+
+  async sendNftTxAsync(recipient, collection_id, token_id, admin) {
+    const tx = this.api.tx.nft.transfer(recipient, collection_id, token_id, 0);
+      await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, tx));
+    }
+
+  async registerQuoteDepositAsync(depositorAddress, amount) {
+    log(`${depositorAddress} deposited ${amount} in ${quoteId} currency`);
+
+    const contract = new ContractPromise(this.api, this.abi, this.matcherAddress);
+
+    const value = 0;
+    const maxgas = 1000000000000;
+
+    let amountBN = new BigNumber(amount);
+    const tx = contract.tx.registerDeposit(value, maxgas, quoteId, amountBN.toString(), depositorAddress);
+    await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, tx));
+
+  }
+
+  async registerNftDepositAsync(depositorAddress, collection_id, token_id) {
+    log(`${depositorAddress} deposited ${collection_id}, ${token_id}`);
+    const contract = new ContractPromise(this.api, this.abi, this.matcherAddress);
+
+    const value = 0;
+    const maxgas = 1000000000000;
+
+    // if (blackList.includes(token_id)) {
+    //   log(`Blacklisted NFT received. Silently returning.`, "WARNING");
+    //   return;
+    // }
+
+    const tx = contract.tx.registerNftDeposit(value, maxgas, collection_id, token_id, depositorAddress);
+    await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, tx));
+  }
+
 }
 
 module.exports = {
