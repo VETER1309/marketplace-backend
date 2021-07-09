@@ -85,6 +85,7 @@ class UniqueClient {
 
     this.abi = new Abi(contractAbi);
     this.matcherAddress = config.marketContractAddress;
+    this.useWhiteLists = config.whiteList;
   }
 
   async subscribeToBlocks(onNewBlock) {
@@ -142,6 +143,20 @@ class UniqueClient {
 
     const tx = contract.tx.registerNftDeposit(value, maxgas, collection_id, token_id, depositorAddress);
     await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, tx));
+  }
+
+  async addWhiteList(userAddress) {
+    if (!this.useWhiteLists) return;
+
+    const whiteListedBefore = (await api.query.nft.contractWhiteList(this.matcherAddress, userAddress)).toJSON();
+    if (!whiteListedBefore) {
+      try {
+        const addTx = api.tx.nft.addToContractWhiteList(this.matcherAddress, userAddress);
+        await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, addTx));
+      } catch(error) {
+        log(`Failed add to while list. Address: ${userAddress}`);
+      }
+    }
   }
 
 }

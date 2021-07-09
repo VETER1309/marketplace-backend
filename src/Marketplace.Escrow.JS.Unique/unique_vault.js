@@ -87,8 +87,8 @@ async function addIncomingNFTTransaction(address, collectionId, tokenId, blockNu
 
   // Clear all previous appearances of this NFT with status 0, update to error
   const errorMessage = "Failed to register (sync err)";
-  const updateIncomingNftSql = `UPDATE public."${incomingTxTable}" 
-    SET  "Status" = 2, "ErrorMessage" = $1 
+  const updateIncomingNftSql = `UPDATE public."${incomingTxTable}"
+    SET  "Status" = 2, "ErrorMessage" = $1
     WHERE "Status" = 0 AND "CollectionId" = $2 AND "TokenId" = $3;`;
   await conn.query(updateIncomingNftSql, [errorMessage, collectionId, tokenId]);
 
@@ -410,25 +410,6 @@ function onNewBlock(header) {
   cancelDelay();
 }
 
-async function addWhiteList({
-  api, 
-  userAddress, 
-  sender, 
-  marketContractAddress
-}) {
-  if (!config.whiteList) return;
-
-  const whiteListedBefore = (await api.query.nft.contractWhiteList(marketContractAddress, userAddress)).toJSON();
-  if (!whiteListedBefore) {
-    try {
-      const addTx = api.tx.nft.addToContractWhiteList(marketContractAddress, userAddress);
-      await sendTransactionAsync(sender, addTx);
-    } catch(error) {
-      log(`Failed add to while list. Address: ${userAddress}`);
-    }
-  }
-}
-
 async function handleUnique() {
   const uniqueClient = await createUniqueClient(config);
 
@@ -484,15 +465,9 @@ async function handleUnique() {
         deposit = true;
 
         try {
-          const paraments = {
-            api,
-            userAddress: ksmTx.sender,
-            sender: admin,
-            marketContractAddress: config.marketContractAddress
-          };
           // Add sender to contract white list
-          await addWhiteList(paraments);
-          
+          await uniqueClient.addWhiteList(ksmTx.sender);
+
           await uniqueClient.registerQuoteDepositAsync(ksmTx.sender, ksmTx.amount);
           await setIncomingKusamaTransactionStatus(ksmTx.id, 1);
           log(`Quote deposit from ${ksmTx.sender} amount ${ksmTx.amount.toString()}`, "REGISTERED");
