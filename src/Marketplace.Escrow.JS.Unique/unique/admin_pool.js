@@ -22,16 +22,23 @@ class AdminPool {
 
   async rent(callback) {
     const freeAdminIndex = await this.findFreeAdmin();
+    let released = false;
+    const releaseOnce = () => {
+      if(!released) {
+        released = true;
+        this.releaseAdmin(freeAdminIndex);
+      }
+    }
     try {
       this.rentAdmin(freeAdminIndex);
       const isMainAdmin = freeAdminIndex === 0;
-      const callbackResult = callback(this.allAdmins[freeAdminIndex], isMainAdmin);
+      const callbackResult = callback(this.allAdmins[freeAdminIndex], isMainAdmin, releaseOnce);
       if('then' in callbackResult) {
         await callbackResult;
       }
     }
     finally{
-      this.releaseAdmin(freeAdminIndex);
+      releaseOnce();
     }
   }
 

@@ -27,10 +27,11 @@ function getTransactionStatus(events, status) {
   return "Fail";
 }
 
-function sendTransactionAsync(sender, transaction) {
+function sendTransactionAsync(sender, transaction, releaseSender) {
   return new Promise(async (resolve, reject) => {
     try {
       let unsub = await transaction.signAndSend(sender, ({ events = [], status }) => {
+        releaseSender && releaseSender();
         const transactionStatus = getTransactionStatus(events, status);
 
         if (transactionStatus === "Success") {
@@ -101,13 +102,17 @@ class UniqueClient {
     };
   }
 
+  sendAsAdmin(tx) {
+    return this.adminsPool.rent((admin, isMain, release) => sendTransactionAsync(admin, tx, release));
+  }
+
   parseExtrinsic(extrinsic, extrinsicIndex, events, blockNum) {
     return parseExtrinsic(extrinsic, extrinsicIndex, events, this.matcherAddress, this.abi, this.adminAddress, blockNum);
   }
 
   async sendNftTxAsync(recipient, collection_id, token_id, admin) {
     const tx = this.api.tx.nft.transfer(recipient, collection_id, token_id, 0);
-      await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, tx));
+      await this.sendAsAdmin(tx);
     }
 
   async registerQuoteDepositAsync(depositorAddress, amount) {
@@ -120,8 +125,7 @@ class UniqueClient {
 
     let amountBN = new BigNumber(amount);
     const tx = contract.tx.registerDeposit(value, maxgas, quoteId, amountBN.toString(), depositorAddress);
-    await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, tx));
-
+    await this.sendAsAdmin(tx);
   }
 
   async registerNftDepositAsync(depositorAddress, collection_id, token_id) {
@@ -137,7 +141,7 @@ class UniqueClient {
     // }
 
     const tx = contract.tx.registerNftDeposit(value, maxgas, collection_id, token_id, depositorAddress);
-    await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, tx));
+    await this.sendAsAdmin(tx);
   }
 
   async addWhiteList(userAddress) {
@@ -147,7 +151,7 @@ class UniqueClient {
     if (!whiteListedBefore) {
       try {
         const addTx = api.tx.nft.addToContractWhiteList(this.matcherAddress, userAddress);
-        await this.adminsPool.rent((admin, isMain) => sendTransactionAsync(admin, addTx));
+        await this.sendAsAdmin(addTx);
       } catch(error) {
         log(`Failed add to while list. Address: ${userAddress}`);
       }
