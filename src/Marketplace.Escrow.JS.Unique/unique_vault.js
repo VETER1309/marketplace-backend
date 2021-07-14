@@ -10,7 +10,9 @@ const {createUniqueClient,
   EXTRINSIC_TYPE_CANCEL_CONTRACT_CALL,
   EXTRINSIC_TYPE_WITHDRAW_CONTRACT_CALL
 } = require('./unique');
+const tasksQueue =require('./tasks-queue');
 const fs = require('fs');
+const CancellationToken = require('./cancellation-token');
 
 const { Client } = require('pg');
 let dbClient = null;
@@ -25,6 +27,7 @@ const uniqueBlocksTable = "UniqueProcessedBlock";
 
 let bestBlockNumber = 0; // The highest block in chain (not final)
 let timer;
+let isRunning = new CancellationToken();
 
 let resolver = null;
 function delay(ms) {
@@ -104,42 +107,35 @@ async function setIncomingNftTransactionStatus(id, status, error = "OK") {
   await conn.query(updateIncomingNftStatusSql, [status, error, id]);
 }
 
-async function getIncomingNFTTransaction() {
+async function getIncomingNFTTransactions() {
   const conn = await getDbConnection();
 
   const getIncomingNftsSql = `SELECT * FROM public."${incomingTxTable}"
-    WHERE "Status" = 0`;
+    WHERE "Status" = 0 LIMIT 100`;
   // Get one non-processed incoming NFT transaction
   // Id | CollectionId | TokenId | Value | OwnerPublicKey | Status | LockTime | ErrorMessage | UniqueProcessedBlockId
   const res = await conn.query(getIncomingNftsSql);
 
-  let nftTx = {
-    id: '',
-    collectionId: 0,
-    tokenId: 0,
-    sender: null
-  };
+  return await Promise.all(res.rows.map(async nftTx => {
 
-  if (res.rows.length > 0) {
-    let publicKey = Buffer.from(res.rows[0].OwnerPublicKey, 'base64');
+    let publicKey = Buffer.from(nftTx.OwnerPublicKey, 'base64');
 
     try {
       // Convert public key into address
       const address = encodeAddress(publicKey);
 
-      nftTx.id = res.rows[0].Id;
-      nftTx.collectionId = res.rows[0].CollectionId;
-      nftTx.tokenId = res.rows[0].TokenId;
-      nftTx.sender = address;
+      return {
+        id: nftTx.Id,
+        collectionId: nftTx.CollectionId,
+        tokenId: nftTx.TokenId,
+        sender: address
+      };
     }
     catch (e) {
-      setIncomingNftTransactionStatus(res.rows[0].Id, 2, e.toString());
+      await tasksQueue.enqueue(() => setIncomingNftTransactionStatus(res.rows[0].Id, 2, e.toString()), isRunning);
       log(e, "ERROR");
     }
-
-  }
-
-  return nftTx;
+  }));
 }
 
 async function addOffer(seller, collectionId, tokenId, quoteId, price) {
@@ -214,26 +210,20 @@ async function setIncomingKusamaTransactionStatus(id, status, error = "OK") {
   await conn.query(updateIncomingKusamaTransactionStatusSql, [status, error, id]);
 }
 
-async function getIncomingKusamaTransaction() {
+async function getIncomingKusamaTransactions() {
   const conn = await getDbConnection();
 
   const selectIncomingQuoteTxsSql = `SELECT * FROM public."${incomingQuoteTxTable}"
     WHERE
       "Status" = 0
-      AND "QuoteId" = 2 LIMIT 1
+      AND "QuoteId" = 2 LIMIT 100
   `;
   // Get one non-processed incoming Kusama transaction
   // Id | Amount | QuoteId | Description | AccountPublicKey | BlockId | Status | LockTime | ErrorMessage
   const res = await conn.query(selectIncomingQuoteTxsSql);
 
-  let ksmTx = {
-    id: '',
-    amount: '0',
-    sender: null
-  };
-
-  if (res.rows.length > 0) {
-    let publicKey = res.rows[0].AccountPublicKey;
+  return await Promise.all(res.rows.map(async ksmTx => {
+    let publicKey = ksmTx.AccountPublicKey;
 
     try {
       if ((publicKey[0] != '0') || (publicKey[1] != 'x'))
@@ -245,15 +235,17 @@ async function getIncomingKusamaTransaction() {
       ksmTx.id = res.rows[0].Id;
       ksmTx.sender = address;
       ksmTx.amount = res.rows[0].Amount;
+      return {
+        id: ksmTx.Id,
+        sender: address,
+        amount: ksmTx.Amount
+      };
     }
     catch (e) {
-      setIncomingKusamaTransactionStatus(res.rows[0].Id, 2, e.toString());
+      await tasksQueue.enqueue(() => setIncomingKusamaTransactionStatus(res.rows[0].Id, 2, e.toString()), isRunning);
       log(e, "ERROR");
     }
-
-  }
-
-  return ksmTx;
+  }));
 }
 
 async function scanNftBlock(uniqueClient, blockNum) {
@@ -415,61 +407,71 @@ async function handleUnique() {
       // Get last processed block
       let blockNum = parseInt(await getLastHandledUniqueBlock()) + 1;
 
-      try {
-        if (blockNum <= bestBlockNumber) {
-          await addHandledUniqueBlock(blockNum);
+      if (blockNum <= bestBlockNumber) {
+        await tasksQueue.enqueue(async () => {
+          try {
+            await addHandledUniqueBlock(blockNum);
 
-          // Handle NFT Deposits (by analysing block transactions)
-          await scanNftBlock(uniqueClient, blockNum);
-        } else break;
+            // Handle NFT Deposits (by analysing block transactions)
+            await scanNftBlock(uniqueClient, blockNum);
+          } catch (ex) {
+            log(ex);
+            if (!ex.toString().includes("State already discarded"))
+              await delay(1000);
+          }
+        }, isRunning);
+      } else break;
 
-      } catch (ex) {
-        log(ex);
-        if (!ex.toString().includes("State already discarded"))
-          await delay(1000);
+
+      if(isRunning.cancellationRequested) {
+        return;
       }
     }
 
     // Handle queued NFT deposits
-    let deposit = false;
-    do {
-      deposit = false;
-      const nftTx = await getIncomingNFTTransaction();
+    const nftTxs = await getIncomingNFTTransactions();
+    for(let nftTx of nftTxs) {
       if (nftTx.id.length > 0) {
-        deposit = true;
-
-        try {
-          await uniqueClient.registerNftDepositAsync(nftTx.sender, nftTx.collectionId, nftTx.tokenId);
-          await setIncomingNftTransactionStatus(nftTx.id, 1);
-          log(`NFT deposit from ${nftTx.sender} id (${nftTx.collectionId}, ${nftTx.tokenId})`, "REGISTERED");
-        } catch (e) {
-          log(`NFT deposit from ${nftTx.sender} id (${nftTx.collectionId}, ${nftTx.tokenId})`, "FAILED TO REGISTER");
-          await delay(6000);
-        }
+        await tasksQueue.enqueue(async () => {
+          try {
+            await uniqueClient.registerNftDepositAsync(nftTx.sender, nftTx.collectionId, nftTx.tokenId);
+            await setIncomingNftTransactionStatus(nftTx.id, 1);
+            log(`NFT deposit from ${nftTx.sender} id (${nftTx.collectionId}, ${nftTx.tokenId})`, "REGISTERED");
+          } catch (e) {
+            log(`NFT deposit from ${nftTx.sender} id (${nftTx.collectionId}, ${nftTx.tokenId})`, "FAILED TO REGISTER");
+            await delay(6000);
+          }
+        }, isRunning);
       }
-    } while (deposit);
+
+      if(isRunning.cancellationRequested) {
+        return;
+      }
+    }
 
     // Handle queued KSM deposits
-    do {
-      deposit = false;
-      const ksmTx = await getIncomingKusamaTransaction();
+    const ksmTxs = await getIncomingKusamaTransactions();
+    for(let ksmTx of ksmTxs) {
       if (ksmTx.id.length > 0) {
-        deposit = true;
+        await tasksQueue.enqueue(async () => {
+          try {
+            // Add sender to contract white list
+            await uniqueClient.addWhiteList(ksmTx.sender);
 
-        try {
-          // Add sender to contract white list
-          await uniqueClient.addWhiteList(ksmTx.sender);
-
-          await uniqueClient.registerQuoteDepositAsync(ksmTx.sender, ksmTx.amount);
-          await setIncomingKusamaTransactionStatus(ksmTx.id, 1);
-          log(`Quote deposit from ${ksmTx.sender} amount ${ksmTx.amount.toString()}`, "REGISTERED");
-        } catch (e) {
-          log(`Quote deposit from ${ksmTx.sender} amount ${ksmTx.amount.toString()}`, "FAILED TO REGISTER");
-          await delay(6000);
-        }
+            await uniqueClient.registerQuoteDepositAsync(ksmTx.sender, ksmTx.amount);
+            await setIncomingKusamaTransactionStatus(ksmTx.id, 1);
+            log(`Quote deposit from ${ksmTx.sender} amount ${ksmTx.amount.toString()}`, "REGISTERED");
+          } catch (e) {
+            log(`Quote deposit from ${ksmTx.sender} amount ${ksmTx.amount.toString()}`, "FAILED TO REGISTER");
+            await delay(6000);
+          }
+        }, isRunning);
       }
 
-    } while (deposit);
+      if(isRunning.cancellationRequested) {
+        return;
+      }
+    }
 
     await delay(6000);
   }
@@ -489,4 +491,28 @@ async function main() {
   await handleUnique();
 }
 
-main().catch(console.error).finally(() => process.exit());
+
+async function gracefulStop() {
+  if(!isRunning.cancellationRequested) {
+    log('Shutting down unique escrow service...')
+    isRunning.cancel();
+    await tasksQueue.waitAllTasks();
+    // await new Promise(r => setTimeout(r, 20000));
+    log('Unique escrow has stopped gracefully.')
+    process.exit();
+  }
+}
+
+// catching signals and do something before exit
+[
+  'beforeExit',
+  // 'uncaughtException', 'unhandledRejection',
+  'SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP',
+  'SIGABRT','SIGBUS', 'SIGFPE', 'SIGUSR1', 'SIGSEGV',
+  'SIGUSR2', 'SIGTERM',
+].forEach((signal) => {
+    process.on(signal, gracefulStop);
+});
+
+
+main().catch(console.error).finally(gracefulStop);

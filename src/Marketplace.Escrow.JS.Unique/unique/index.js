@@ -28,10 +28,15 @@ function getTransactionStatus(events, status) {
 }
 
 function sendTransactionAsync(sender, transaction, releaseSender) {
+  let statusNotifications = 0;
   return new Promise(async (resolve, reject) => {
     try {
       let unsub = await transaction.signAndSend(sender, ({ events = [], status }) => {
-        releaseSender && releaseSender();
+        if(statusNotifications >= 1) {
+          releaseSender && releaseSender();
+        }
+        statusNotifications++;
+
         const transactionStatus = getTransactionStatus(events, status);
 
         if (transactionStatus === "Success") {
@@ -58,8 +63,8 @@ async function createUniqueClient(config) {
   const keyring = new Keyring({ type: 'sr25519' });
 
   const mainAdmin = keyring.addFromUri(config.adminSeed);
-  adminAddress = mainAdmin.address.toString();
-  log(`Escrow admin address: ${adminAddress}`);
+  mainAdminAddress = mainAdmin.address.toString();
+  log(`Escrow admin address: ${mainAdminAddress}`);
 
   const otherAdmins = config.additionalAdminSeeds.map(a => keyring.addFromUri(a));
   log('Additional admins addresses');
@@ -73,7 +78,7 @@ async function createUniqueClient(config) {
 }
 
 class UniqueClient {
-  constructor(api, config, adminsPool, adminAddress) {
+  constructor(api, config, adminsPool, mainAdminAddress) {
     this.api = api;
 
     this.adminsPool = adminsPool;
@@ -81,7 +86,7 @@ class UniqueClient {
     this.abi = new Abi(contractAbi);
     this.matcherAddress = config.marketContractAddress;
     this.useWhiteLists = config.whiteList;
-    this.adminAddress = adminAddress;
+    this.mainAdminAddress = mainAdminAddress;
   }
 
   async subscribeToBlocks(onNewBlock) {
@@ -107,13 +112,17 @@ class UniqueClient {
   }
 
   parseExtrinsic(extrinsic, extrinsicIndex, events, blockNum) {
-    return parseExtrinsic(extrinsic, extrinsicIndex, events, this.matcherAddress, this.abi, this.adminAddress, blockNum);
+    return parseExtrinsic(extrinsic, extrinsicIndex, events, this.matcherAddress, this.abi, this.mainAdminAddress, blockNum);
   }
 
   async sendNftTxAsync(recipient, collection_id, token_id, admin) {
-    const tx = this.api.tx.nft.transfer(recipient, collection_id, token_id, 0);
-      await this.sendAsAdmin(tx);
-    }
+    await this.adminsPool.rent(async (admin, isMainAdmin, release) => {
+      const tx = isMainAdmin
+        ? this.api.tx.nft.transfer(recipient, collection_id, token_id, 0)
+        : this.api.tx.nft.transferFrom(this.mainAdminAddress, recipient, collection_id, token_id, 0);
+      await sendTransactionAsync(admin, tx, release);
+    });
+  }
 
   async registerQuoteDepositAsync(depositorAddress, amount) {
     log(`${depositorAddress} deposited ${amount} in ${quoteId} currency`);
