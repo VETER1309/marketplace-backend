@@ -11,10 +11,10 @@ namespace Marketplace.Backend.Offers
         [BindProperty(Name = "collectionId")] 
         public List<ulong>? CollectionIds { get; set; }
 
-        [BindProperty(BinderType = typeof(BigIntegerModelBinder))]
+        [BindProperty(Name = "minPrice", BinderType = typeof(BigIntegerModelBinder))]
         public BigInteger? MinPrice { get; set; }
         
-        [BindProperty(BinderType = typeof(BigIntegerModelBinder))]
+        [BindProperty(Name = "maxPrice", BinderType = typeof(BigIntegerModelBinder))]
         public BigInteger? MaxPrice { get; set; }
         
         [BindProperty(Name = "seller")]
