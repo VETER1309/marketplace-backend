@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Threading.Tasks;
 using Marketplace.Backend.Offers;
 using Marketplace.Backend.OnHold;
+using Marketplace.Backend.Serializing;
 using Marketplace.Backend.Trades;
 using Marketplace.Db;
 using Microsoft.AspNetCore.Builder;
@@ -49,6 +51,7 @@ namespace Marketplace.Backend
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "Marketplace.Backend", Version = "v1" });
+                c.SchemaFilter<BigIntegerSchemaFilter>();
             });
 
             services.AddScoped<IOfferService, OfferService>();

@@ -155,7 +155,7 @@ async function addOffer(seller, collectionId, tokenId, quoteId, price) {
     VALUES ($1, now(), $2, $3, $4, $5, '', 1, $6, $7);`;
   const offerId = uuidv4();
   //Id | CreationDate | CollectionId | TokenId | Price | Seller | Metadata | OfferStatus | SellerPublicKeyBytes | QuoteId
-  await conn.query(inserOfferSql, [offerId, collectionId, tokenId, price, publicKey, decodeAddress(seller), quoteId]);
+  await conn.query(inserOfferSql, [offerId, collectionId, tokenId, price.padStart(40, '0'), publicKey, decodeAddress(seller), quoteId]);
 
   const updateNftIncomesSql = `UPDATE public."${incomingTxTable}"
 	SET "OfferId"=$1
@@ -426,7 +426,7 @@ async function scanNftBlock(api, admin, blockNum) {
           const collectionId = beHexToNum(collectionIdHex).toString();
           const tokenId = beHexToNum(tokenIdHex).toString();
           const quoteId = beHexToNum(quoteIdHex).toString();
-          const price = beHexToNum(priceHex).toString();
+          const price = beHexToNum(priceHex).toFixed();
           log(`${ex.signer.toString()} listed ${collectionId}-${tokenId} in block ${blockNum} hash: ${blockHash} for ${quoteId}-${price}`);
 
           await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price);

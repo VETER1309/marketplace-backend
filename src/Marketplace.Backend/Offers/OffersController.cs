@@ -18,16 +18,9 @@ namespace Marketplace.Backend.Offers
 
         [HttpGet]
         [Route("")]
-        public Task<PaginationResult<OfferDto>> Get([FromQuery] PaginationParameter paginationParameter, [FromQuery(Name = "collectionId")] List<ulong>? collectionIds = default)
+        public Task<PaginationResult<OfferDto>> Get([FromQuery] PaginationParameter paginationParameter, [FromQuery] OffersFilter filter)
         {
-            return _offerService.Get(collectionIds, paginationParameter);
-        }
-
-        [HttpGet]
-        [Route("{seller}")]
-        public Task<PaginationResult<OfferDto>> Get(string seller, [FromQuery] PaginationParameter paginationParameter, [FromQuery(Name = "collectionId")] List<ulong>? collectionIds = default)
-        {
-            return _offerService.Get(seller, collectionIds, paginationParameter);
+            return _offerService.Get(filter, paginationParameter);
         }
     }
 }
