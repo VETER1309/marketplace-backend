@@ -74,11 +74,21 @@ async function getDbConnection() {
   return dbClient;
 }
 
-async function getLastHandledKusamaBlock() {
+async function getLastHandledKusamaBlock(api) {
   const conn = await getDbConnection();
   const res = await conn.query(`SELECT * FROM public."${kusamaBlocksTable}" ORDER BY public."${kusamaBlocksTable}"."BlockNumber" DESC LIMIT 1;`)
-  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : 0;
+  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : await getStartingBlock(api);
   return lastBlock;
+}
+
+async function getStartingBlock(api) {
+  if('current'.localeCompare(config.startFromBlock, undefined, {sensitivity: 'accent'}) === 0) {
+    const head = await api.rpc.chain.getHeader();
+    const block = head.number.toNumber();
+    return block;
+  }
+
+  return parseInt(config.startFromBlock);
 }
 
 async function addHandledKusamaBlock(blockNumber) {
@@ -293,7 +303,7 @@ async function handleKusama() {
     while (true) {
       try {
         // Get the last processed block
-        let lastKusamaBlock = parseInt(await getLastHandledKusamaBlock());
+        let lastKusamaBlock = parseInt(await getLastHandledKusamaBlock(api));
 
         if (lastKusamaBlock + 1 <= parseInt(signedFinalizedBlock.block.header.number)) {
           lastKusamaBlock++;
