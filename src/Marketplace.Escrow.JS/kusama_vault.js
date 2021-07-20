@@ -260,7 +260,7 @@ async function transfer(api, sender, recipient, amountBN) {
   log(`Total escrow balance = ${totalBalance.toString()}`);
 
   if (totalBalance.isLessThan(amountBN)) {
-    const error = `Escrow balance ${totalBalance.toString()} is insufficient to send ${amountBN.toString()}.`;
+    const error = `Escrow balance ${totalBalance.toString()} is insufficient to send ${amountBN.toString()} to ${recipient.toString()}.`;
     log(error);
     throw error;
   }
