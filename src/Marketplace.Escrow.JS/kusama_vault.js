@@ -3,14 +3,16 @@ const delay = require('delay');
 const config = require('./config');
 const { decodeAddress, encodeAddress } = require('@polkadot/util-crypto');
 const { v4: uuidv4 } = require('uuid');
+const {addMarketFeeToPrice, subtractMarketFeeFromTotal} = require('./market_fee');
+const BigNumber = require('./big_number');
 
-var BigNumber = require('bignumber.js');
-BigNumber.config({ DECIMAL_PLACES: 12, ROUNDING_MODE: BigNumber.ROUND_DOWN, decimalSeparator: '.' });
+const WITHDRAW_TYPE_UNUSED = 0;
+const WITHDRAW_TYPE_MATCHED = 1;
+
 
 const { Client } = require('pg');
 let dbClient = null;
 
-const FEE = 0.1;
 const incomingTxTable = "QuoteIncomingTransaction";
 const outgoingTxTable = "QuoteOutgoingTransaction";
 const kusamaBlocksTable = "KusamaProcessedBlock";
@@ -174,13 +176,9 @@ async function scanKusamaBlock(api, blockNum) {
         const amount = args[1];
         const address = ex.signer.toString();
 
-        // Remove 10% fee
-        const addFee = (new BigNumber(FEE)).plus(1);
-        const amountBN = (new BigNumber(amount))
-          .dividedBy(addFee)
-          .integerValue(BigNumber.ROUND_UP); // 1.10        
+        const amountMinusFee = subtractMarketFeeFromTotal(new BigNumber(amount), BigNumber.ROUND_UP);
 
-        await addIncomingKusamaTransaction(amountBN.toString(), address, blockNum);
+        await addIncomingKusamaTransaction(amountMinusFee.toString(), address, blockNum);
       }
       else {
         log(`Quote deposit from ${ex.signer.toString()} amount ${args[1]}`, "FAILED");
@@ -234,45 +232,40 @@ function sendTxAsync(sender, transaction) {
 }
 
 async function withdrawAsync(api, sender, recipient, amount, withdrawType) {
-
-  // Check if market commission is big enough to pay transaction fee. If not, return the amount + commission - tx fee.
   let amountBN = new BigNumber(amount);
-  let marketFee = (withdrawType == 0) ? new BigNumber(0) : amountBN.dividedBy(51.001).integerValue(BigNumber.ROUND_DOWN); // We received 102% of price, so the fee is 2/102 = 1/51 (+0.001 for rounding errors)
+  if (withdrawType == WITHDRAW_TYPE_UNUSED) {
+    return withdrawUnused(api, sender, recipient, amountBN);
+  }
+
+  return withdrawMatched(api, sender, recipient, amountBN);
+}
+
+function withdrawMatched(api, sender, recipient, amountBN) {
+  log(`Quote withdraw matched: ${recipient.toString()} withdarwing amount ${amountBN.toString()}`, "START");
+  return transfer(api, sender, recipient, amountBN);
+}
+
+function withdrawUnused(api, sender, recipient, amountBN) {
+    // Withdraw unused => return commission
+    amountBN = addMarketFeeToPrice(amountBN, BigNumber.ROUND_DOWN);
+    log(`Quote withdraw unused: ${recipient.toString()} withdarwing amount ${amountBN.toString()}`, "START");
+    return transfer(api, sender, recipient, amountBN);
+}
+
+
+async function transfer(api, sender, recipient, amountBN) {
   const totalBalanceObj = await api.query.system.account(sender.address)
   const totalBalance = new BigNumber(totalBalanceObj.data.free);
   log(`amountBN = ${amountBN.toString()}`);
-  log(`Market fee = ${marketFee.toString()}`);
   log(`Total escrow balance = ${totalBalance.toString()}`);
-  let additionalMarketFee = new BigNumber(0); // in case if marketFee is insufficient
 
-  let balanceTransaction;
-  let feesSatisfied = false;
-  while (!feesSatisfied) {
-    balanceTransaction = api.tx.balances.transfer(recipient, amountBN.toString());
-    const info = await balanceTransaction.paymentInfo(sender);
-    const networkFee = new BigNumber(info.partialFee);
-    log(`networkFee = ${networkFee.toString()}`);
-  
-    feesSatisfied = true;
-    if (networkFee.isGreaterThan(marketFee.plus(additionalMarketFee))) {
-      additionalMarketFee = networkFee.minus(marketFee);
-      amountBN = amountBN.minus(additionalMarketFee);
-      log(`Market fee ${marketFee.toString()} is insufficient to pay network fee of ${networkFee.toString()}. Will only send ${amountBN.toString()}`);
-      feesSatisfied = false;
-    }
-    // Check that total escrow balance is enough to send this amount
-    if (totalBalance.minus(marketFee).isLessThan(amountBN)) {
-      log(`Escrow balance ${totalBalance.toString()} is insufficient to send ${amountBN.toString()}. Will only send ${totalBalance.minus(networkFee).toString()}.`);
-      amountBN = totalBalance.minus(networkFee);
-      feesSatisfied = false;
-    }
-
-    if (amountBN.isLessThan(0)) {
-      log(`Withdraw is too small. Will not process.`);
-      throw "Withdrawal is too small";
-    }
+  if (totalBalance.isLessThan(amountBN)) {
+    const error = `Escrow balance ${totalBalance.toString()} is insufficient to send ${amountBN.toString()} to ${recipient.toString()}.`;
+    log(error);
+    throw error;
   }
 
+  let balanceTransaction = api.tx.balances.transfer(recipient, amountBN.toString());
   await sendTxAsync(sender, balanceTransaction);
 }
 
@@ -322,12 +315,6 @@ async function handleKusama() {
           let withdrawType = ksmTx.withdrawType;
           let amountBN = new BigNumber(ksmTx.amount);
           let amountReturned = amountBN;
-          if (withdrawType == 0) {
-            // Withdraw unused => return commission
-            // Add 2% fee to the returned amount
-            amountReturned = amountBN.multipliedBy(51.001).dividedBy(50.001).integerValue(BigNumber.ROUND_DOWN);
-          }
-          log(`Quote withdraw (${(withdrawType == 0)?"unused":"matched"}): ${ksmTx.recipient.toString()} withdarwing amount ${amountReturned.toString()}`, "START");
 
           // Set status before handling (safety measure)
           await setOutgoingKusamaTransactionStatus(ksmTx.id, 1);
@@ -344,7 +331,6 @@ async function handleKusama() {
 
     await delay(1000);
   }
-
 }
 
 async function main() {
