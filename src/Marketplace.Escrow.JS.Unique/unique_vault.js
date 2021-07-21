@@ -61,12 +61,22 @@ async function getDbConnection() {
   return dbClient;
 }
 
-async function getLastHandledUniqueBlock() {
+async function getLastHandledUniqueBlock(api) {
   const conn = await getDbConnection();
   const selectLastHandledUniqueBlockSql = `SELECT * FROM public."${uniqueBlocksTable}" ORDER BY public."${uniqueBlocksTable}"."BlockNumber" DESC LIMIT 1;`;
   const res = await conn.query(selectLastHandledUniqueBlockSql);
-  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : 0;
+  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : await getStartingBlock(api);
   return lastBlock;
+}
+
+async function getStartingBlock(api) {
+  if('current'.localeCompare(config.startFromBlock, undefined, {sensitivity: 'accent'}) === 0) {
+    const head = await api.rpc.chain.getHeader();
+    const block = head.number.toNumber();
+    return block;
+  }
+
+  return parseInt(config.startFromBlock);
 }
 
 async function addHandledUniqueBlock(blockNumber) {
@@ -602,7 +612,7 @@ async function handleUnique() {
     // 1. Catch up with blocks
     while (true) {
       // Get last processed block
-      let blockNum = parseInt(await getLastHandledUniqueBlock()) + 1;
+      let blockNum = parseInt(await getLastHandledUniqueBlock(api)) + 1;
 
       try {
         if (blockNum <= bestBlockNumber) {
