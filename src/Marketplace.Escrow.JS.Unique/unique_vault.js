@@ -430,7 +430,7 @@ async function scanNftBlock(api, admin, blockNum) {
           const price = beHexToNum(priceHex).toFixed();
           log(`${ex.signer.toString()} listed ${collectionId}-${tokenId} in block ${blockNum} hash: ${blockHash} for ${quoteId}-${price}`);
 
-          const [collection, token] = await Promise.all(api.query.nft.collectionById(collectionId), api.query.nft.nftItemList(collectionId, tokenId));
+          const [collection, token] = await Promise.all([api.query.nft.collectionById(collectionId), api.query.nft.nftItemList(collectionId, tokenId)]);
 
           const tokenMeta = decodeTokenMeta(collection, token) || {};
 
