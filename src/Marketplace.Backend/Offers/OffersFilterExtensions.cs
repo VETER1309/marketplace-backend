@@ -1,9 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Numerics;
+using System.Reflection;
 using Marketplace.Backend.Base58;
 using Marketplace.Db.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace Marketplace.Backend.Offers
 {
@@ -45,20 +48,71 @@ namespace Marketplace.Backend.Offers
             {
                 return offers;
             }
-            
+
             // Ensure that seller is a proper base58 encoded address
             string base64Seller = "Invalid";
             try {
                 var pk = AddressEncoding.AddressToPublicKey(seller);
                 base64Seller = Convert.ToBase64String(pk);
-            } 
-            catch (ArgumentNullException) {} 
-            catch (FormatException) {} 
+            }
+            catch (ArgumentNullException) {}
+            catch (FormatException) {}
             catch (ArgumentOutOfRangeException) {}
             catch (ArgumentException) {}
             // Console.WriteLine($"Converted {seller} to base64: {base64Seller}");
 
             return offers.Where(o => o.Seller == base64Seller);
+        }
+
+        public static IQueryable<Offer> HasTraits(this IQueryable<Offer> offers)
+        {
+            return offers.Where(o => EF.Functions.JsonExists(o.Metadata, "traits"));
+        }
+
+        public static IQueryable<Offer> FilterByMinTraitsCount(this IQueryable<Offer> offers, int? minTraitsCount)
+        {
+            if (!minTraitsCount.HasValue)
+            {
+                return offers;
+            }
+
+            return offers.HasTraits().Where(o => o.Metadata.RootElement.GetProperty("traits").GetArrayLength() >= minTraitsCount);
+        }
+
+        public static IQueryable<Offer> FilterByMaxTraitsCount(this IQueryable<Offer> offers, int? maxTraitsCount)
+        {
+            if (!maxTraitsCount.HasValue)
+            {
+                return offers;
+            }
+
+            return offers.HasTraits().Where(o => o.Metadata.RootElement.GetProperty("traits").GetArrayLength() <= maxTraitsCount);
+        }
+
+        public static IQueryable<Offer> FilterByTraits(this IQueryable<Offer> offers, IReadOnlyCollection<long>? traits)
+        {
+            if (traits?.Any() != true)
+            {
+                return offers;
+            }
+
+            var param = Expression.Parameter(typeof(Offer), "o");
+            var rootElementExpr = Expression.Property(Expression.Property(param, "Metadata"), "RootElement");
+            var getTraitsExpr = Expression.TypeAs(
+                Expression.Call(rootElementExpr, "GetProperty", Array.Empty<Type>(), Expression.Constant("traits", typeof(string))),
+                typeof(object)
+            );
+
+            var jsonExistAll = typeof(NpgsqlJsonDbFunctionsExtensions).GetMethod("JsonExistAll", BindingFlags.Public | BindingFlags.Static);
+
+            var traitsExpr = traits.Select(t => Expression.Constant(t.ToString(), typeof(string)));
+            var traitsArray = Expression.NewArrayInit(typeof(string), traitsExpr);
+
+            var body = Expression.Call(jsonExistAll, Expression.Constant(EF.Functions, typeof(DbFunctions)), getTraitsExpr, traitsArray);
+            var filter = Expression.Lambda<Func<Offer, bool>>(body, param);
+
+            //o => EF.Functions.JsonExistAll(o.Metadata.RootElement.GetProperty("traits"), traitsStr)
+            return offers.HasTraits().Where(filter);
         }
 
         public static IQueryable<Offer> ApplyFilter(this IQueryable<Offer> offers, OffersFilter filter)
@@ -67,7 +121,10 @@ namespace Marketplace.Backend.Offers
                 .FilterBySeller(filter.Seller)
                 .FilterByMaxPrice(filter.MaxPrice)
                 .FilterByMinPrice(filter.MinPrice)
-                .FilterByCollectionIds(filter.CollectionIds);
+                .FilterByCollectionIds(filter.CollectionIds)
+                .FilterByMinTraitsCount(filter.MinTraitsCount)
+                .FilterByMaxTraitsCount(filter.MaxTraitsCount)
+                .FilterByTraits(filter.RequiredTraits);
         }
     }
 }
