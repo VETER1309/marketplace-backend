@@ -20,6 +20,7 @@
     "bignumber.js": "^9.0.0",
     "fs": "0.0.1-security",
     "pg": "^8.5.1",
+    "protobufjs": "^6.11.2",
     "uuid": "^8.3.2"
   },
   "standard": {
