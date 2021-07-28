@@ -69,24 +69,14 @@ namespace Marketplace.Backend.Offers
             return offers.Where(o => EF.Functions.JsonExists(o.Metadata, "traits"));
         }
 
-        public static IQueryable<Offer> FilterByMinTraitsCount(this IQueryable<Offer> offers, int? minTraitsCount)
+        public static IQueryable<Offer> FilterByTraitsCount(this IQueryable<Offer> offers, List<int>? traitsCount)
         {
-            if (!minTraitsCount.HasValue)
+            if (traitsCount?.Any() != true)
             {
                 return offers;
             }
 
-            return offers.HasTraits().Where(o => o.Metadata.RootElement.GetProperty("traits").GetArrayLength() >= minTraitsCount);
-        }
-
-        public static IQueryable<Offer> FilterByMaxTraitsCount(this IQueryable<Offer> offers, int? maxTraitsCount)
-        {
-            if (!maxTraitsCount.HasValue)
-            {
-                return offers;
-            }
-
-            return offers.HasTraits().Where(o => o.Metadata.RootElement.GetProperty("traits").GetArrayLength() <= maxTraitsCount);
+            return offers.HasTraits().Where(o => traitsCount.Contains(o.Metadata.RootElement.GetProperty("traits").GetArrayLength()));
         }
 
         public static IQueryable<Offer> FilterByTraits(this IQueryable<Offer> offers, IReadOnlyCollection<long>? traits)
@@ -122,8 +112,7 @@ namespace Marketplace.Backend.Offers
                 .FilterByMaxPrice(filter.MaxPrice)
                 .FilterByMinPrice(filter.MinPrice)
                 .FilterByCollectionIds(filter.CollectionIds)
-                .FilterByMinTraitsCount(filter.MinTraitsCount)
-                .FilterByMaxTraitsCount(filter.MaxTraitsCount)
+                .FilterByTraitsCount(filter.TraitsCount)
                 .FilterByTraits(filter.RequiredTraits);
         }
     }

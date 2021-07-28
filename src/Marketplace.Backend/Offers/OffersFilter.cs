@@ -20,11 +20,8 @@ namespace Marketplace.Backend.Offers
         [BindProperty(Name = "seller")]
         public string? Seller { get; set; }
 
-        [BindProperty(Name = "minTraitsCount")]
-        public int? MinTraitsCount { get; set; }
-
-        [BindProperty(Name = "maxTraitsCount")]
-        public int? MaxTraitsCount { get; set; }
+        [BindProperty(Name = "traitsCount")]
+        public List<int>? TraitsCount { get; set; }
 
         [BindProperty(Name = "requiredTraits")]
         public List<long>? RequiredTraits { get; set; }
