@@ -56,25 +56,45 @@ function sendTransactionAsync(sender, transaction, releaseSender) {
   });
 }
 
+function adminFromSeed(seed, keyring) {
+  const admin = keyring.addFromUri(seed);
+  admin.address = admin.address.toString();
+  return admin;
+}
 
 async function createUniqueClient(config) {
   const api = await connect(config);
 
   const keyring = new Keyring({ type: 'sr25519' });
 
-  const mainAdmin = keyring.addFromUri(config.adminSeed);
-  mainAdminAddress = mainAdmin.address.toString();
-  log(`Escrow admin address: ${mainAdminAddress}`);
-
-  const otherAdmins = config.additionalAdminSeeds.map(a => keyring.addFromUri(a));
-  log('Additional admins addresses');
-  for(let a of otherAdmins) {
-    log(a.address.toString());
+  const escrowAdmin = adminFromSeed(config.adminSeed, keyring);
+  const contractAdmins = (config.admins.contractAdmins || []).map(a => adminFromSeed(a, keyring));
+  const collectionAdmins = {};
+  const collectionAdminsAddresses = {};
+  for(let collectionId of Object.keys(config.collectionAdmins)) {
+    collectionAdmins[collectionId] = (config.collectionAdmins[collectionId] || []).map(a => adminFromSeed(a, keyring));
+    collectionAdminsAddresses[collectionId] = collectionAdmins[collectionId].map(a => a.address);
   }
 
-  const adminsPool = new AdminPool(mainAdmin, otherAdmins);
+  const admins = {
+    escrowAdmin: escrowAdmin,
+    contractAdmins: contractAdmins,
+    collectionAdmins: collectionAdmins
+  }
 
-  return new UniqueClient(api, config, adminsPool, mainAdmin.address.toString());
+
+  const adminsPool = new AdminPool(admins);
+
+  const adminsAddresses = JSON.stringify({
+    escrowAdmin: escrowAdmin.address,
+    contractAdmins: contractAdmins.map(a => a.address),
+    collectionAdmins: collectionAdminsAddresses
+  }, null, '  ');
+
+  log(`Admins:
+${adminsAddresses}`);
+
+  return new UniqueClient(api, config, adminsPool, escrowAdmin.address.toString());
 }
 
 class UniqueClient {
@@ -107,8 +127,8 @@ class UniqueClient {
     };
   }
 
-  sendAsAdmin(tx) {
-    return this.adminsPool.rent((admin, isMain, release) => sendTransactionAsync(admin, tx, release));
+  sendAsContractAdmin(tx) {
+    return this.adminsPool.rentContractAdmin((admin, isMain, release) => sendTransactionAsync(admin, tx, release));
   }
 
   parseExtrinsic(extrinsic, extrinsicIndex, events, blockNum) {
@@ -116,7 +136,7 @@ class UniqueClient {
   }
 
   async sendNftTxAsync(recipient, collection_id, token_id, admin) {
-    await this.adminsPool.rent(async (admin, isMainAdmin, release) => {
+    await this.adminsPool.rentCollectionAdmin(collection_id, async (admin, isMainAdmin, release) => {
       const tx = isMainAdmin
         ? this.api.tx.nft.transfer(recipient, collection_id, token_id, 0)
         : this.api.tx.nft.transferFrom(this.mainAdminAddress, recipient, collection_id, token_id, 0);
@@ -134,7 +154,7 @@ class UniqueClient {
 
     let amountBN = new BigNumber(amount);
     const tx = contract.tx.registerDeposit(value, maxgas, quoteId, amountBN.toString(), depositorAddress);
-    await this.sendAsAdmin(tx);
+    await this.sendAsContractAdmin(tx);
   }
 
   async registerNftDepositAsync(depositorAddress, collection_id, token_id) {
@@ -150,7 +170,7 @@ class UniqueClient {
     // }
 
     const tx = contract.tx.registerNftDeposit(value, maxgas, collection_id, token_id, depositorAddress);
-    await this.sendAsAdmin(tx);
+    await this.sendAsContractAdmin(tx);
   }
 
   async addWhiteList(userAddress) {
@@ -160,7 +180,8 @@ class UniqueClient {
     if (!whiteListedBefore) {
       try {
         const addTx = api.tx.nft.addToContractWhiteList(this.matcherAddress, userAddress);
-        await this.sendAsAdmin(addTx);
+        //await this.sendAsAdmin(addTx {{{{
+        // To do rent escrow admin.
       } catch(error) {
         log(`Failed add to while list. Address: ${userAddress}`);
       }

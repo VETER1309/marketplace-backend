@@ -1,15 +1,17 @@
-function parseArray(value, separator) {
-  if(!value){
-    return value;
+const defaultAdmins = `
+{
+  "contractAdmins": [],
+  "collectionAdmins": {
+    "25": []
   }
-
-  return value.split(separator).map(s => s.trim()).filter(s => s.length > 0);
 }
+`;
 
 const config = {
   wsEndpoint : process.env.wsEndpoint || 'wss://testnet2.uniquenetwork.io',
 
   adminSeed : process.env.ADMIN_SEED || '//Alice',
+  admins : JSON.parse(process.env.ADMINS || defaultAdmins),
   additionalAdminSeeds : parseArray(process.env.ADMIN_SEED, ',') || [],
   marketContractAddress : process.env.MatcherContractAddress || "5HGaEHg8PDhcEZGkfe6Tr9xmaroXjY5xX2c3NBdshoMkgZb6",
 

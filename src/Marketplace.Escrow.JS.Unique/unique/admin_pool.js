@@ -1,74 +1,121 @@
-function counter(maxValue) {
-  let index = -1;
-  return () => {
-    index = (index + 1)%maxValue;
-    return index;
-  }
-}
-
 class AdminPool {
-  constructor(mainAdmin, otherAdmins) {
-    this.mainAdmin = mainAdmin;
-    this.otherAdmins = otherAdmins;
+  constructor(admins) {
+    this.admins = admins;
 
-    this.allAdmins = [mainAdmin, ...otherAdmins];
-    this.isAdminUsed = Array(this.allAdmins.length).fill(false);
-    this.nextIndex = counter(this.allAdmins.length);
+    this.isUsed = {}; // admin address -> is that admin rented
 
-    this.freeAdminsCount = this.allAdmins.length;
-    this.adminRequests = [];
+    this.returnAdminToGroupActions = {}; // admin address -> actions to return admin to pool
+    this.contractsGroupId = 'contracts'
+
+    this.adminToGroup = {}; // admin address -> admin groups, contract admin or collection id
+
+    for(let admin of admins.contractAdmins) {
+      this.adminToGroup[admin.address] = this.pushOrInit(this.adminToGroup[admin.address], this.contractsGroupId);
+    }
+
+    for(let collectionId of Object.keys(admins.collectionAdmins)) {
+      for(let admin of admins.collectionAdmins[collectionId]) {
+        this.adminToGroup[admin.address] = this.pushOrInit(this.adminToGroup[admin.address], collectionId);
+      }
+    }
+
+    this.requestPendingsByGroup = {}; // admin group -> requests waiting for his release
   }
 
+  pushOrInit(array, value) {
+    if(array) {
+      array.push(value);
+      return array;
+    }
 
-  async rent(callback) {
-    const freeAdminIndex = await this.findFreeAdmin();
+    return [value];
+  }
+
+  async rentContractAdmin(callback) {
+    await this.rentAdmin(this.admins.contractAdmins, this.contractsGroupId, callback);
+  }
+
+  async rentCollectionAdmin(collectionId, callback) {
+    await this.rentAdmin(this.admins.collectionAdmins[collectionId], collectionId.toString(), callback);
+  }
+
+  rentAdmin(adminsGroup, adminsGroupId, callback) {
+    if(adminsGroup) {
+      while(adminsGroup.length > 0) {
+        const admin = adminsGroup.shift();
+        if(this.isUsed[admin.address]) {
+          this.returnAdminToGroupActions[admin.address].push(() => adminsGroup.push(admin));
+        }
+        else {
+          this.returnAdminToGroupActions[admin.address] = [() => adminsGroup.push(admin)];
+          return useAdmin(admin, callback);
+        }
+      }
+    }
+
+    if(!this.isUsed[this.admins.escrowAdmin.address]) {
+      return useAdmin(this.admins.escrowAdmin, callback);
+    }
+
+    return new Promise((resolve) => this.requestPendingsByGroup[adminsGroupId] = this.pushOrInit(this.requestPendingsByGroup[adminsGroupId], resolve))
+      .then(() => this.rentAdmin(collection, adminsGroupId, callback));
+  }
+
+  async useAdmin(admin, callback) {
+    this.isUsed[admin.address] = true;
+
     let released = false;
     const releaseOnce = () => {
       if(!released) {
         released = true;
-        this.releaseAdmin(freeAdminIndex);
+        this.releaseAdmin(admin);
       }
     }
+
     try {
-      this.rentAdmin(freeAdminIndex);
-      const isMainAdmin = freeAdminIndex === 0;
-      const callbackResult = callback(this.allAdmins[freeAdminIndex], isMainAdmin, releaseOnce);
-      if('then' in callbackResult) {
-        await callbackResult;
+      const r = callback(admin, admin === this.admins.escrowAdmin, releaseOnce);
+      if('then' in r) {
+        return await r;
       }
+
+      return r;
     }
     finally{
       releaseOnce();
     }
+
   }
 
-  rentAdmin(index) {
-    this.freeAdminsCount--;
-    this.isAdminUsed[index] = true;
+  releaseAdmin(admin) {
+    this.isAdminUsed[admin.address] = false;
+    this.returnAdminToGroup();
+    const pendingRequest = this.findPendingRequest(admin);
+    pendingRequest && pendingRequest();
   }
 
-  releaseAdmin(index) {
-    this.freeAdminsCount++;
-    this.isAdminUsed[index] = false;
-    if(this.adminRequests.length > 0) {
-      const nextAdminRequest = this.adminRequests.shift();
-      nextAdminRequest();
-    }
-  }
-
-  findFreeAdmin() {
-    if(this.freeAdminsCount > 0) {
-      let freeAdminIndex = 0;
-      do {
-        freeAdminIndex = this.nextIndex();
-      } while(this.isAdminUsed[freeAdminIndex]);
-
-      return Promise.resolve(freeAdminIndex);
+  findPendingRequest(admin) {
+    const adminGroups = admin === this.admins.escrowAdmin ? Object.keys(this.requestPendingsByGroup) : this.adminToGroup[admin.address];
+    for(let group of adminGroups) {
+      if(this.requestPendingsByGroup[group] && this.requestPendingsByGroup[group].length > 0) {
+        const request = this.requestPendingsByGroup[group].shift();
+        if(this.requestPendingsByGroup[group].length === 0) {
+          delete this.requestPendingsByGroup[group];
+        }
+        return request;
+      }
     }
 
-    return new Promise((resolve, reject) => {
-      this.adminRequests.push(resolve);
-    }).then(() => this.findFreeAdmin());
+    return undefined;
+  }
+
+  returnAdminToGroup(admin) {
+    const releaseActions = this.returnAdminToGroupActions[admin.address];
+    this.returnAdminToGroupActions[admin.address] = undefined;
+    if(releaseActions) {
+      for(let action of releaseActions) {
+        action();
+      }
+    }
   }
 }
 
