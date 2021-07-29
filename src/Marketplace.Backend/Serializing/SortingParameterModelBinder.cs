@@ -12,26 +12,29 @@ namespace Marketplace.Backend.Serializing
 
         public Task BindModelAsync(ModelBindingContext bindingContext)
         {
+            if (bindingContext.ModelType != typeof(SortingParameter))
+            {
+                return Task.CompletedTask;
+            }
+
             var value = bindingContext.ValueProvider.GetValue(bindingContext.ModelName).FirstValue;
             if (value == null)
             {
-                bindingContext.Result = ModelBindingResult.Success(null);
+                return Task.CompletedTask;
+            }
+
+            var match = _parser.Match(value);
+            if (match.Success)
+            {
+                bindingContext.Result = ModelBindingResult.Success(new SortingParameter()
+                {
+                    Column = match.Groups["column"].Value,
+                    Order = string.Equals("asc", match.Groups["order"].Value, StringComparison.InvariantCultureIgnoreCase) ? SortingOrder.Asc : SortingOrder.Desc
+                });
             }
             else
             {
-                var match = _parser.Match(value);
-                if (match.Success)
-                {
-                    bindingContext.Result = ModelBindingResult.Success(new SortingParameter()
-                    {
-                        Column = match.Groups["column"].Value,
-                        Order = string.Equals("asc", match.Groups["order"].Value, StringComparison.InvariantCultureIgnoreCase) ? SortingOrder.Asc : SortingOrder.Desc
-                    });
-                }
-                else
-                {
-                    bindingContext.Result = ModelBindingResult.Failed();
-                }
+                bindingContext.Result = ModelBindingResult.Failed();
             }
             return Task.CompletedTask;
         }

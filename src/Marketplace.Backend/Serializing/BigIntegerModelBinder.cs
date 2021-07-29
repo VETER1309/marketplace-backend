@@ -11,18 +11,16 @@ namespace Marketplace.Backend.Serializing
             var value = bindingContext.ValueProvider.GetValue(bindingContext.ModelName).FirstValue;
             if (value == null)
             {
-                bindingContext.Result = ModelBindingResult.Success(null);
+                return Task.CompletedTask;
+            }
+
+            if (BigInteger.TryParse(value, out var model))
+            {
+                bindingContext.Result = bindingContext.ModelType == typeof(BigInteger?) ? ModelBindingResult.Success((BigInteger?)model) : ModelBindingResult.Success(model);
             }
             else
             {
-                if (BigInteger.TryParse(value, out var model))
-                {
-                    bindingContext.Result = bindingContext.ModelType == typeof(BigInteger?) ? ModelBindingResult.Success((BigInteger?)model) : ModelBindingResult.Success(model);
-                }
-                else
-                {
-                    bindingContext.Result = ModelBindingResult.Failed();
-                }
+                bindingContext.Result = ModelBindingResult.Failed();
             }
             return Task.CompletedTask;
         }
