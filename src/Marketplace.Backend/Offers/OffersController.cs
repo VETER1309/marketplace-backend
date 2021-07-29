@@ -1,7 +1,9 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
+using Marketplace.Backend.Sorting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Swashbuckle.AspNetCore.Annotations;
 
 namespace Marketplace.Backend.Offers
 {
@@ -16,11 +18,16 @@ namespace Marketplace.Backend.Offers
             _offerService = offerService;
         }
 
+        private const string GetSortDescription =
+            "Possible values: asc(Price), desc(Price), asc(TokenId), desc(TokenId), asc(CreationDate), desc(CreationDate).";
         [HttpGet]
         [Route("")]
-        public Task<PaginationResult<OfferDto>> Get([FromQuery] PaginationParameter paginationParameter, [FromQuery] OffersFilter filter)
+        public Task<PaginationResult<OfferDto>> Get(
+            [FromQuery] PaginationParameter paginationParameter,
+            [FromQuery] OffersFilter filter,
+            [FromQuery, SwaggerParameter(GetSortDescription)] List<SortingParameter>? sort)
         {
-            return _offerService.Get(filter, paginationParameter);
+            return _offerService.Get(filter, paginationParameter, sort);
         }
     }
 }
