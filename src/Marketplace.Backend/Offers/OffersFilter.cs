@@ -23,7 +23,10 @@ namespace Marketplace.Backend.Offers
         [BindProperty(Name = "traitsCount")]
         public List<int>? TraitsCount { get; set; }
 
-        [BindProperty(Name = "requiredTraits")]
-        public List<long>? RequiredTraits { get; set; }
+        [BindProperty(Name = "searchText")]
+        public string? SearchText { get; set; }
+
+        [BindProperty(Name = "searchLocale")]
+        public string? SearchLocale { get; set; }
     }
 }

@@ -6,7 +6,10 @@ const config = require('./config');
 const { v4: uuidv4 } = require('uuid');
 const { connect, log } = require('./lib');
 const fs = require('fs');
-const decodeTokenMeta = require('./token-decoder');
+const {
+  decodeTokenMeta,
+  decodeSearchKeywords
+} = require('./token-decoder');
 
 var BigNumber = require('bignumber.js');
 BigNumber.config({ DECIMAL_PLACES: 12, ROUNDING_MODE: BigNumber.ROUND_DOWN, decimalSeparator: '.' });
@@ -94,8 +97,8 @@ async function addIncomingNFTTransaction(address, collectionId, tokenId, blockNu
 
   // Clear all previous appearances of this NFT with status 0, update to error
   const errorMessage = "Failed to register (sync err)";
-  const updateIncomingNftSql = `UPDATE public."${incomingTxTable}" 
-    SET  "Status" = 2, "ErrorMessage" = $1 
+  const updateIncomingNftSql = `UPDATE public."${incomingTxTable}"
+    SET  "Status" = 2, "ErrorMessage" = $1
     WHERE "Status" = 0 AND "CollectionId" = $2 AND "TokenId" = $3;`;
   await conn.query(updateIncomingNftSql, [errorMessage, collectionId, tokenId]);
 
@@ -156,7 +159,7 @@ async function getIncomingNFTTransaction() {
   return nftTx;
 }
 
-async function addOffer(seller, collectionId, tokenId, quoteId, price, metadata) {
+async function addOffer(seller, collectionId, tokenId, quoteId, price, metadata, searchKeywords) {
   const conn = await getDbConnection();
 
   // Convert address into public key
@@ -172,6 +175,28 @@ async function addOffer(seller, collectionId, tokenId, quoteId, price, metadata)
 	SET "OfferId"=$1
 	WHERE "CollectionId" = $2 AND "TokenId" = $3 AND "OfferId" IS NULL;`
   await conn.query(updateNftIncomesSql, [offerId, collectionId, tokenId]);
+
+  await saveSearchKeywords(conn, collectionId, tokenId, searchKeywords);
+}
+
+async function saveSearchKeywords(conn, collectionId, tokenId, searchKeywords) {
+  if(searchKeywords.length <= 0) {
+    return;
+  }
+
+  const keywordsStored = await conn.query(`SELECT Max("CollectionId") from public."TokenTextSearch"
+    WHERE "CollectionId" = $1 AND "TokenId" = $2`,
+    [collectionId, tokenId]
+  );
+  if(keywordsStored.rows.length < 0) {
+    return;
+  }
+
+  await Promise.all(searchKeywords.map(({locale, text}) =>
+    conn.query(`INSERT INTO public."TokenTextSearch"
+("Id", "CollectionId", "TokenId", "Text", "Locale") VALUES
+($1, $2, $3, $4, $5);`, [uuidv4(), collectionId, tokenId, text, locale]))
+  );
 }
 
 async function getOpenOfferId(collectionId, tokenId) {
@@ -402,9 +427,9 @@ async function scanNftBlock(api, admin, blockNum) {
       const address = ex.signer.toString();
       const collectionId = args[1];
       const tokenId = args[2];
-      
+
       const paraments = {
-        api,            
+        api,
         userAddress: address,
         sender: admin,
         marketContractAddress: config.marketContractAddress,
@@ -443,8 +468,9 @@ async function scanNftBlock(api, admin, blockNum) {
           const [collection, token] = await Promise.all([api.query.nft.collectionById(collectionId), api.query.nft.nftItemList(collectionId, tokenId)]);
 
           const tokenMeta = decodeTokenMeta(collection, token) || {};
+          const tokenSearchKeywords = decodeSearchKeywords(colleciton, token) || [];
 
-          await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price, tokenMeta);
+          await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price, tokenMeta, tokenSearchKeywords);
         }
 
         // Buy call
@@ -580,9 +606,9 @@ async function subscribeToBlocks(api) {
 }
 
 async function addWhiteList({
-  api, 
-  userAddress, 
-  sender, 
+  api,
+  userAddress,
+  sender,
   marketContractAddress
 }) {
   if (!config.whiteList) return;
@@ -660,19 +686,19 @@ async function handleUnique() {
       if (ksmTx.id.length > 0) {
         deposit = true;
 
-        try {          
+        try {
 
           const paraments = {
-            api,            
+            api,
             userAddress: ksmTx.sender,
             sender: admin,
-            marketContractAddress: config.marketContractAddress            
+            marketContractAddress: config.marketContractAddress
           };
           // Add sender to contract white list
           await addWhiteList(paraments);
 
-          await registerQuoteDepositAsync({api, sender: admin, depositorAddress: ksmTx.sender, amount: ksmTx.amount});          
-          await setIncomingKusamaTransactionStatus(ksmTx.id, 1);          
+          await registerQuoteDepositAsync({api, sender: admin, depositorAddress: ksmTx.sender, amount: ksmTx.amount});
+          await setIncomingKusamaTransactionStatus(ksmTx.id, 1);
           log(`Quote deposit from ${ksmTx.sender} amount ${ksmTx.amount.toString()}`, "REGISTERED");
         } catch (e) {
           log(`Quote deposit from ${ksmTx.sender} amount ${ksmTx.amount.toString()}`, "FAILED TO REGISTER");
@@ -693,10 +719,10 @@ async function migrateDb(){
   await conn.query(migrationSql);
 }
 
-async function jsonMetadataMigrated() {
+async function migrated(migrationId) {
   const conn = await getDbConnection();
-  const migrationSql = `SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210722091927_JsonMetadata'`;
-  const res = await conn.query(migrationSql);
+  const migrationSql = `SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = $1`;
+  const res = await conn.query(migrationSql, [migrationId]);
   return res.rows.length > 0;
 }
 
@@ -723,28 +749,48 @@ async function createTestOffers() {
   for(let i = 1; i < 200; i++) {
     const [collection, token] = await Promise.all([api.query.nft.collectionById(25), api.query.nft.nftItemList(25, i)]);
     const metadata = decodeTokenMeta(collection, token);
+    const textSearchKeywords = decodeSearchKeywords(collection, token);
     if(metadata) {
-      await addOffer(adminAddress, 25, i, 2, '100000000000', metadata);
+      await addOffer(adminAddress, 25, i, 2, '100000000000', metadata, textSearchKeywords);
     }
   }
   for(let i = 1; i < 200; i++) {
     const [collection, token] = await Promise.all([api.query.nft.collectionById(23), api.query.nft.nftItemList(23, i)]);
     const metadata = decodeTokenMeta(collection, token);
+    const textSearchKeywords = decodeSearchKeywords(collection, token);
     if(metadata) {
-      await addOffer(adminAddress, 23, i, 2, '100000000000', metadata);
+      await addOffer(adminAddress, 23, i, 2, '100000000000', metadata, textSearchKeywords);
     }
+  }
+}
+
+async function setTextSearchForAllOffers() {
+  const conn = await getDbConnection();
+  const offers = await conn.query(`SELECT DISTINCT "CollectionId", "TokenId" FROM public."Offer";`)
+  const api = await connect(config);
+  for(let offer of offers.rows) {
+    const [collection, token] = await Promise.all([api.query.nft.collectionById(+offer.CollectionId), api.query.nft.nftItemList(+offer.CollectionId, +offer.TokenId)]);
+    const textSearchKeywords = decodeSearchKeywords(collection, token);
+    await saveSearchKeywords(conn, +offer.CollectionId, +offer.TokenId, textSearchKeywords);
   }
 }
 
 async function main() {
   log(`config.wsEndpoint: ${config.marketContractAddress}`);
   log(`config.marketContractAddress: ${config.marketContractAddress}`);
-  const isMetadataMigrated = await jsonMetadataMigrated();
+  const [isMetadataMigrated, isTextSearchMigrated] =
+    await Promise.all([migrated('20210722091927_JsonMetadata'), migrated('20210802081707_TokensTextSearch')]);
+
   await migrateDb();
 
   if(!isMetadataMigrated)
   {
     await setMetadataForAllOffers();
+  }
+
+  if(!isTextSearchMigrated)
+  {
+    await setTextSearchForAllOffers();
   }
 
   await handleUnique();

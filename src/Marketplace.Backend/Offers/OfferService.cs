@@ -32,7 +32,7 @@ namespace Marketplace.Backend.Offers
         public Task<PaginationResult<OfferDto>> Get(OffersFilter filter, PaginationParameter parameter, IReadOnlyCollection<SortingParameter>? sorting)
         {
             return _marketplaceDbContext.Offers
-                .ApplyFilter(filter)
+                .ApplyFilter(_marketplaceDbContext.TokenTextSearches, filter)
                 .Where(o => o.OfferStatus == OfferStatus.Active)
                 .AsNoTrackingWithIdentityResolution()
                 .Order(sorting, _sortMappings)

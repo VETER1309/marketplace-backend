@@ -18,6 +18,7 @@ namespace Marketplace.Db
         public DbSet<NftIncomingTransaction> NftIncomingTransactions { get; set; } = null!;
         public DbSet<NftOutgoingTransaction> NftOutgoingTransactions { get; set; } = null!;
         public DbSet<QuoteOutgoingTransaction> QuoteOutgoingTransactions { get; set; } = null!;
+        public DbSet<TokenTextSearch> TokenTextSearches { get; set; } = null!;
 
         public MarketplaceDbContext(DbContextOptions options) : base(options)
         {

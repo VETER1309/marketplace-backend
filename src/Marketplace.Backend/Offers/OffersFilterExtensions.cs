@@ -79,33 +79,22 @@ namespace Marketplace.Backend.Offers
             return offers.HasTraits().Where(o => traitsCount.Contains(o.Metadata.RootElement.GetProperty("traits").GetArrayLength()));
         }
 
-        public static IQueryable<Offer> FilterByTraits(this IQueryable<Offer> offers, IReadOnlyCollection<long>? traits)
+        public static IQueryable<Offer> FilterBySearchText(this IQueryable<Offer> offers, IQueryable<TokenTextSearch> textSearches, string? searchText, string? locale)
         {
-            if (traits?.Any() != true)
+            if (string.IsNullOrWhiteSpace(searchText))
             {
                 return offers;
             }
 
-            var param = Expression.Parameter(typeof(Offer), "o");
-            var rootElementExpr = Expression.Property(Expression.Property(param, "Metadata"), "RootElement");
-            var getTraitsExpr = Expression.TypeAs(
-                Expression.Call(rootElementExpr, "GetProperty", Array.Empty<Type>(), Expression.Constant("traits", typeof(string))),
-                typeof(object)
-            );
-
-            var jsonExistAll = typeof(NpgsqlJsonDbFunctionsExtensions).GetMethod("JsonExistAll", BindingFlags.Public | BindingFlags.Static);
-
-            var traitsExpr = traits.Select(t => Expression.Constant(t.ToString(), typeof(string)));
-            var traitsArray = Expression.NewArrayInit(typeof(string), traitsExpr);
-
-            var body = Expression.Call(jsonExistAll, Expression.Constant(EF.Functions, typeof(DbFunctions)), getTraitsExpr, traitsArray);
-            var filter = Expression.Lambda<Func<Offer, bool>>(body, param);
-
-            //o => EF.Functions.JsonExistAll(o.Metadata.RootElement.GetProperty("traits"), traitsStr)
-            return offers.HasTraits().Where(filter);
+            var matchedTokens = textSearches
+                .Where(t => EF.Functions.ILike(t.Text, $"%{searchText}%") && (t.Locale == locale || t.Locale == null))
+                .GroupBy(t => new { t.CollectionId, t.TokenId })
+                .Select(k => k.Key);
+            return offers.Join(matchedTokens, offer => new {offer.CollectionId, offer.TokenId},
+                match => new {match.CollectionId, match.TokenId}, (offer, match) => offer);
         }
 
-        public static IQueryable<Offer> ApplyFilter(this IQueryable<Offer> offers, OffersFilter filter)
+        public static IQueryable<Offer> ApplyFilter(this IQueryable<Offer> offers, IQueryable<TokenTextSearch> textSearches, OffersFilter filter)
         {
             return offers
                 .FilterBySeller(filter.Seller)
@@ -113,7 +102,7 @@ namespace Marketplace.Backend.Offers
                 .FilterByMinPrice(filter.MinPrice)
                 .FilterByCollectionIds(filter.CollectionIds)
                 .FilterByTraitsCount(filter.TraitsCount)
-                .FilterByTraits(filter.RequiredTraits);
+                .FilterBySearchText(textSearches, filter.SearchText, filter.SearchLocale);
         }
     }
 }
