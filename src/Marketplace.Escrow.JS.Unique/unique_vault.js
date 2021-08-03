@@ -468,7 +468,7 @@ async function scanNftBlock(api, admin, blockNum) {
           const [collection, token] = await Promise.all([api.query.nft.collectionById(collectionId), api.query.nft.nftItemList(collectionId, tokenId)]);
 
           const tokenMeta = decodeTokenMeta(collection, token) || {};
-          const tokenSearchKeywords = decodeSearchKeywords(colleciton, token) || [];
+          const tokenSearchKeywords = decodeSearchKeywords(collection, token) || [];
 
           await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price, tokenMeta, tokenSearchKeywords);
         }
