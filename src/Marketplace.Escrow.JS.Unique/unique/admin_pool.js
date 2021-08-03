@@ -5,7 +5,8 @@ class AdminPool {
     this.isUsed = {}; // admin address -> is that admin rented
 
     this.returnAdminToGroupActions = {}; // admin address -> actions to return admin to pool
-    this.contractsGroupId = 'contracts'
+    this.contractsGroupId = 'contracts';
+    this.mainAdminGroupId = 'mainAdmin';
 
     this.adminToGroup = {}; // admin address -> admin groups, contract admin or collection id
 
@@ -37,6 +38,10 @@ class AdminPool {
 
   async rentCollectionAdmin(collectionId, callback) {
     await this.rentAdmin(this.admins.collectionAdmins[collectionId], collectionId.toString(), callback);
+  }
+  
+  async rentMainAdmin(callback) {
+    await this.rentAdmin([], this.mainAdminGroupId, callback);
   }
 
   rentAdmin(adminsGroup, adminsGroupId, callback) {

@@ -131,6 +131,10 @@ class UniqueClient {
     return this.adminsPool.rentContractAdmin((admin, isMain, release) => sendTransactionAsync(admin, tx, release));
   }
 
+  sendAsMainAdmin(tx) {
+    return this.adminsPool.rentMainAdmin((admin, isMain, release) => sendTransactionAsync(admin, tx, release));
+  }
+
   parseExtrinsic(extrinsic, extrinsicIndex, events, blockNum) {
     return parseExtrinsic(extrinsic, extrinsicIndex, events, this.matcherAddress, this.abi, this.mainAdminAddress, blockNum);
   }
@@ -180,8 +184,7 @@ class UniqueClient {
     if (!whiteListedBefore) {
       try {
         const addTx = api.tx.nft.addToContractWhiteList(this.matcherAddress, userAddress);
-        //await this.sendAsAdmin(addTx {{{{
-        // To do rent escrow admin.
+        await this.sendAsMainAdmin(addTx);
       } catch(error) {
         log(`Failed add to while list. Address: ${userAddress}`);
       }
