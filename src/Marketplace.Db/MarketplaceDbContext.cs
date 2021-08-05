@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+﻿using System;
+using System.Globalization;
 using System.Numerics;
 using Marketplace.Db.Models;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ namespace Marketplace.Db
         public DbSet<NftIncomingTransaction> NftIncomingTransactions { get; set; } = null!;
         public DbSet<NftOutgoingTransaction> NftOutgoingTransactions { get; set; } = null!;
         public DbSet<QuoteOutgoingTransaction> QuoteOutgoingTransactions { get; set; } = null!;
+        public DbSet<TokenTextSearch> TokenTextSearches { get; set; } = null!;
 
         public MarketplaceDbContext(DbContextOptions options) : base(options)
         {
@@ -27,7 +29,7 @@ namespace Marketplace.Db
             base.OnModelCreating(modelBuilder);
 
             var bigIntegerConverter = new ValueConverter<BigInteger, string>(
-                model => model.ToString(CultureInfo.InvariantCulture),
+                model => model.ToString(CultureInfo.InvariantCulture).PadLeft(40, '0'),
                 provider => BigInteger.Parse(provider));
 
             modelBuilder.Entity<Offer>()

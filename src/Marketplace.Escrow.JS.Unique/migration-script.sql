@@ -895,4 +895,104 @@ BEGIN
 END $$;
 COMMIT;
 
+START TRANSACTION;
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210715081147_PriceFilter') THEN
+
+    UPDATE public."Offer"
+    SET "Price"=LPAD("Price", 40, '0');
+
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210715081147_PriceFilter') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20210715081147_PriceFilter', '5.0.2');
+    END IF;
+END $$;
+COMMIT;
+
+START TRANSACTION;
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210722091927_JsonMetadata') THEN
+    ALTER TABLE "Offer" DROP COLUMN "Metadata";
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210722091927_JsonMetadata') THEN
+    ALTER TABLE "Offer" ADD "Metadata" jsonb NULL;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210722091927_JsonMetadata') THEN
+    CREATE INDEX "IX_Offer_Metadata" ON "Offer" ("Metadata");
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210722091927_JsonMetadata') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20210722091927_JsonMetadata', '5.0.2');
+    END IF;
+END $$;
+COMMIT;
+
+START TRANSACTION;
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210802081707_TokensTextSearch') THEN
+    CREATE TABLE "TokenTextSearch" (
+        "Id" uuid NOT NULL,
+        "CollectionId" numeric(20,0) NOT NULL,
+        "TokenId" numeric(20,0) NOT NULL,
+        "Text" text NOT NULL,
+        "Locale" text NULL,
+        CONSTRAINT "PK_TokenTextSearch" PRIMARY KEY ("Id")
+    );
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210802081707_TokensTextSearch') THEN
+    CREATE INDEX "IX_TokenTextSearch_CollectionId_TokenId_Locale" ON "TokenTextSearch" ("CollectionId", "TokenId", "Locale");
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210802081707_TokensTextSearch') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20210802081707_TokensTextSearch', '5.0.2');
+    END IF;
+END $$;
+COMMIT;
+
+START TRANSACTION;
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20210805043620_AddTokenPrefixAndIdToSearch') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20210805043620_AddTokenPrefixAndIdToSearch', '5.0.2');
+    END IF;
+END $$;
+COMMIT;
+
 

@@ -4,15 +4,17 @@ using System.Text.Json;
 using Marketplace.Db;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace Marketplace.Db.Migrations
 {
     [DbContext(typeof(MarketplaceDbContext))]
-    partial class MarketplaceDbContextModelSnapshot : ModelSnapshot
+    [Migration("20210722091927_JsonMetadata")]
+    partial class JsonMetadata
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -243,32 +245,6 @@ namespace Marketplace.Db.Migrations
                         .HasFilter("\"Status\" = 0");
 
                     b.ToTable("QuoteOutgoingTransaction");
-                });
-
-            modelBuilder.Entity("Marketplace.Db.Models.TokenTextSearch", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal>("CollectionId")
-                        .HasColumnType("numeric(20,0)");
-
-                    b.Property<string>("Locale")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Text")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<decimal>("TokenId")
-                        .HasColumnType("numeric(20,0)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CollectionId", "TokenId", "Locale");
-
-                    b.ToTable("TokenTextSearch");
                 });
 
             modelBuilder.Entity("Marketplace.Db.Models.Trade", b =>

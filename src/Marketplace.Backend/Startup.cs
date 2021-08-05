@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Threading.Tasks;
 using Marketplace.Backend.Offers;
 using Marketplace.Backend.OnHold;
+using Marketplace.Backend.Serializing;
 using Marketplace.Backend.Trades;
 using Marketplace.Db;
 using Microsoft.AspNetCore.Builder;
@@ -32,7 +34,7 @@ namespace Marketplace.Backend
             {
                 builder = builder.AddUserSecrets<Startup>();
             }
-            
+
             var configurationRoot = builder.Build();
             var configuration = new Configuration();
             configurationRoot.Bind(configuration);
@@ -49,6 +51,9 @@ namespace Marketplace.Backend
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "Marketplace.Backend", Version = "v1" });
+                c.SchemaFilter<BigIntegerSchemaFilter>();
+                c.SchemaFilter<SortingParameterSchemaFilter>();
+                c.EnableAnnotations();
             });
 
             services.AddScoped<IOfferService, OfferService>();
