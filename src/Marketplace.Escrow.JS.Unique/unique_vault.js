@@ -468,7 +468,7 @@ async function scanNftBlock(api, admin, blockNum) {
           const [collection, token] = await Promise.all([api.query.nft.collectionById(collectionId), api.query.nft.nftItemList(collectionId, tokenId)]);
 
           const tokenMeta = decodeTokenMeta(collection, token) || {};
-          const tokenSearchKeywords = decodeSearchKeywords(collection, token) || [];
+          const tokenSearchKeywords = decodeSearchKeywords(collection, token, tokenId) || [];
 
           await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price, tokenMeta, tokenSearchKeywords);
         }
@@ -749,7 +749,7 @@ async function createTestOffers() {
   for(let i = 1; i < 200; i++) {
     const [collection, token] = await Promise.all([api.query.nft.collectionById(25), api.query.nft.nftItemList(25, i)]);
     const metadata = decodeTokenMeta(collection, token);
-    const textSearchKeywords = decodeSearchKeywords(collection, token);
+    const textSearchKeywords = decodeSearchKeywords(collection, token, i.toString());
     if(metadata) {
       await addOffer(adminAddress, 25, i, 2, '100000000000', metadata, textSearchKeywords);
     }
@@ -757,7 +757,7 @@ async function createTestOffers() {
   for(let i = 1; i < 200; i++) {
     const [collection, token] = await Promise.all([api.query.nft.collectionById(23), api.query.nft.nftItemList(23, i)]);
     const metadata = decodeTokenMeta(collection, token);
-    const textSearchKeywords = decodeSearchKeywords(collection, token);
+    const textSearchKeywords = decodeSearchKeywords(collection, token, i.toString());
     if(metadata) {
       await addOffer(adminAddress, 23, i, 2, '100000000000', metadata, textSearchKeywords);
     }
@@ -770,16 +770,21 @@ async function setTextSearchForAllOffers() {
   const api = await connect(config);
   for(let offer of offers.rows) {
     const [collection, token] = await Promise.all([api.query.nft.collectionById(+offer.CollectionId), api.query.nft.nftItemList(+offer.CollectionId, +offer.TokenId)]);
-    const textSearchKeywords = decodeSearchKeywords(collection, token);
+    const textSearchKeywords = decodeSearchKeywords(collection, token, offer.TokenId.toString());
     await saveSearchKeywords(conn, +offer.CollectionId, +offer.TokenId, textSearchKeywords);
   }
+}
+
+async function truncateTextSearch() {
+  const conn = await getDbConnection();
+  await conn.query(`TRUNCATE public."TokenTextSearch";`)
 }
 
 async function main() {
   log(`config.wsEndpoint: ${config.marketContractAddress}`);
   log(`config.marketContractAddress: ${config.marketContractAddress}`);
-  const [isMetadataMigrated, isTextSearchMigrated] =
-    await Promise.all([migrated('20210722091927_JsonMetadata'), migrated('20210802081707_TokensTextSearch')]);
+  const [isMetadataMigrated, isTextSearchMigrated, isAddTokenPrefixAndIdMigrated] =
+    await Promise.all([migrated('20210722091927_JsonMetadata'), migrated('20210802081707_TokensTextSearch'), migrated('20210805043620_AddTokenPrefixAndIdToSearch')]);
 
   await migrateDb();
 
@@ -788,8 +793,9 @@ async function main() {
     await setMetadataForAllOffers();
   }
 
-  if(!isTextSearchMigrated)
+  if(!isTextSearchMigrated || !isAddTokenPrefixAndIdMigrated)
   {
+    await truncateTextSearch();
     await setTextSearchForAllOffers();
   }
 

@@ -1,12 +1,12 @@
 const protobuf = require('protobufjs')
 const { hexToU8a } = require('@polkadot/util');
+const hexToString = require('./lib/hexToString');
+const isNullOrWhitespace = require('./lib/is-null-or-whitespace');
 
 function decodeMetaType(collection) {
   const schema = collection.toJSON().ConstOnChainSchema;
-  const bytes = hexToU8a(schema);
-  const schemaStr = new TextDecoder().decode(bytes);
+  const schemaStr = hexToString(schema);
   let protoJson = JSON.parse(schemaStr);
-
 
   let root = protobuf.Root.fromJSON(protoJson);
   // Obtain the message type
@@ -41,7 +41,7 @@ function decodeTokenMeta(collection, token) {
   }
 }
 
-function decodeSearchKeywords(collection, token) {
+function decodeSearchKeywords(collection, token, tokenId) {
   try {
     let NFTMeta = decodeMetaType(collection);
 
@@ -66,7 +66,9 @@ function decodeSearchKeywords(collection, token) {
     for(let k of getKeywords(object, NFTMeta)) {
       keywords.push(k);
     }
-    return keywords;
+    keywords.push({locale: null, text: tokenId});
+    keywords.push({locale: null, text: hexToString(collection.toJSON().TokenPrefix)});
+    return keywords.filter(({text}) => !isNullOrWhitespace(text));
   }
   catch (e) {
     return [];
