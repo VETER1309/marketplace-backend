@@ -43,6 +43,22 @@ function decodeTokenMeta(collection, token) {
 
 function decodeSearchKeywords(collection, token, tokenId) {
   try {
+
+    let keywords = [];
+    for(let k of getMetadataTokens(collection, token)) {
+      keywords.push(k);
+    }
+    keywords.push({locale: null, text: tokenId});
+    keywords.push({locale: null, text: hexToString(collection.toJSON().TokenPrefix)});
+    return keywords.filter(({text}) => !isNullOrWhitespace(text));
+  }
+  catch (e) {
+    return [];
+  }
+}
+
+function* getMetadataTokens(collection, token) {
+  try {
     let NFTMeta = decodeMetaType(collection);
 
     const constData = token.toJSON().ConstData;
@@ -62,16 +78,9 @@ function decodeSearchKeywords(collection, token, tokenId) {
       oneofs: true
     });
 
-    let keywords = [];
-    for(let k of getKeywords(object, NFTMeta)) {
-      keywords.push(k);
-    }
-    keywords.push({locale: null, text: tokenId});
-    keywords.push({locale: null, text: hexToString(collection.toJSON().TokenPrefix)});
-    return keywords.filter(({text}) => !isNullOrWhitespace(text));
-  }
-  catch (e) {
-    return [];
+    yield* getKeywords(object, NFTMeta);
+  } catch(error) {
+
   }
 }
 

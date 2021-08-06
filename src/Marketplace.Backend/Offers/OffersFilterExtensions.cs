@@ -86,8 +86,14 @@ namespace Marketplace.Backend.Offers
                 return offers;
             }
 
-            var matchedTokens = textSearches
-                .Where(t => EF.Functions.ILike(t.Text, $"%{searchText}%") && (t.Locale == locale || t.Locale == null))
+            var matchedText = textSearches
+                .Where(t => EF.Functions.ILike(t.Text, $"%{searchText}%"));
+            if (!string.IsNullOrWhiteSpace(locale))
+            {
+                matchedText = matchedText.Where(t => t.Locale == locale || t.Locale == null);
+            }
+
+            var matchedTokens = matchedText
                 .GroupBy(t => new { t.CollectionId, t.TokenId })
                 .Select(k => k.Key);
             return offers.Join(matchedTokens, offer => new {offer.CollectionId, offer.TokenId},

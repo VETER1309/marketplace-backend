@@ -572,6 +572,14 @@ async function createTestOffers() {
       await addOffer(adminAddress, 23, i, 2, '100000000000', metadata, textSearchKeywords);
     }
   }
+  for(let i = 1; i < 200; i++) {
+    const [collection, token] = await Promise.all([api.query.nft.collectionById(112), api.query.nft.nftItemList(112, i)]);
+    const metadata = decodeTokenMeta(collection, token);
+    const textSearchKeywords = decodeSearchKeywords(collection, token, i.toString());
+    if(metadata) {
+      await addOffer(adminAddress, 112, i, 2, '100000000000', metadata, textSearchKeywords);
+    }
+  }
 }
 
 async function setTextSearchForAllOffers() {
@@ -593,9 +601,8 @@ async function truncateTextSearch() {
 async function main() {
   log(`config.wsEndpoint: ${config.marketContractAddress}`);
   log(`config.marketContractAddress: ${config.marketContractAddress}`);
-  const [isMetadataMigrated, isTextSearchMigrated, isAddTokenPrefixAndIdMigrated] =
-    await Promise.all([migrated('20210722091927_JsonMetadata'), migrated('20210802081707_TokensTextSearch'), migrated('20210805043620_AddTokenPrefixAndIdToSearch')]);
-
+  const [isMetadataMigrated, isTextSearchMigrated, isAddTokenPrefixAndIdMigrated, isFixedTokensSearchIndexing] =
+    await Promise.all([migrated('20210722091927_JsonMetadata'), migrated('20210802081707_TokensTextSearch'), migrated('20210805043620_AddTokenPrefixAndIdToSearch'), migrated('20210806043509_FixedTokensSearchIndexing')]);
   await migrateDb();
 
   if(!isMetadataMigrated)
@@ -603,7 +610,7 @@ async function main() {
     await setMetadataForAllOffers();
   }
 
-  if(!isTextSearchMigrated || !isAddTokenPrefixAndIdMigrated)
+  if(!isTextSearchMigrated || !isAddTokenPrefixAndIdMigrated || !isFixedTokensSearchIndexing)
   {
     await truncateTextSearch();
     await setTextSearchForAllOffers();
