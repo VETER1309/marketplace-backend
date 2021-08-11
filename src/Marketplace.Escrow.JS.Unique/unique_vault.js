@@ -72,18 +72,21 @@ async function getLastHandledUniqueBlock(uniqueClient) {
   const conn = await getDbConnection();
   const selectLastHandledUniqueBlockSql = `SELECT * FROM public."${uniqueBlocksTable}" ORDER BY public."${uniqueBlocksTable}"."BlockNumber" DESC LIMIT 1;`;
   const res = await conn.query(selectLastHandledUniqueBlockSql);
-  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : await getStartingBlock(api);
+  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : await getAndStoreStartingBlock(api);
   return lastBlock;
 }
 
-async function getStartingBlock(api) {
+async function getAndStoreStartingBlock(api) {
+  let startingBlock;
   if('current'.localeCompare(config.startFromBlock, undefined, {sensitivity: 'accent'}) === 0) {
     const head = await api.rpc.chain.getHeader();
-    const block = head.number.toNumber();
-    return block;
+    startingBlock = head.number.toNumber();
+  } else {
+    startingBlock = parseInt(config.startFromBlock);
   }
 
-  return parseInt(config.startFromBlock);
+  await addHandledUniqueBlock(startingBlock);
+  return startingBlock;
 }
 
 async function addHandledUniqueBlock(blockNumber) {
@@ -530,10 +533,19 @@ async function migrateDb(){
 }
 
 async function migrated(migrationId) {
-  const conn = await getDbConnection();
-  const migrationSql = `SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = $1`;
-  const res = await conn.query(migrationSql, [migrationId]);
-  return res.rows.length > 0;
+  try {
+    const conn = await getDbConnection();
+    const migrationSql = `SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = $1`;
+    const res = await conn.query(migrationSql, [migrationId]);
+    return res.rows.length > 0;
+  } catch (error) {
+    // 42P01 = table does not exist
+    if(error.code === '42P01') {
+      return false;
+    }
+
+    throw error;
+  }
 }
 
 async function setMetadataForAllOffers() {

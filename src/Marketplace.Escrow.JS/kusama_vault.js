@@ -79,18 +79,21 @@ async function getDbConnection() {
 async function getLastHandledKusamaBlock(api) {
   const conn = await getDbConnection();
   const res = await conn.query(`SELECT * FROM public."${kusamaBlocksTable}" ORDER BY public."${kusamaBlocksTable}"."BlockNumber" DESC LIMIT 1;`)
-  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : await getStartingBlock(api);
+  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : await getAndStoreStartingBlock(api);
   return lastBlock;
 }
 
-async function getStartingBlock(api) {
+async function getAndStoreStartingBlock(api) {
+  let startingBlock;
   if('current'.localeCompare(config.startFromBlock, undefined, {sensitivity: 'accent'}) === 0) {
     const head = await api.rpc.chain.getHeader();
-    const block = head.number.toNumber();
-    return block;
+    startingBlock = head.number.toNumber();
+  } else {
+    startingBlock = parseInt(config.startFromBlock);
   }
 
-  return parseInt(config.startFromBlock);
+  await addHandledKusamaBlock(startingBlock);
+  return startingBlock;
 }
 
 async function addHandledKusamaBlock(blockNumber) {
@@ -112,7 +115,7 @@ async function addIncomingKusamaTransaction(amount, address, blockNumber) {
   // Convert address into public key
   const publicKey = toHexString(decodeAddress(address));
 
-  await conn.query(`INSERT INTO public."${incomingTxTable}"("Id", "Amount", "QuoteId", "Description", "AccountPublicKey", "BlockId", "Status", "LockTime", "ErrorMessage") VALUES ($1, $2, 2, \'\', $3, $4, 0, null, null);`, 
+  await conn.query(`INSERT INTO public."${incomingTxTable}"("Id", "Amount", "QuoteId", "Description", "AccountPublicKey", "BlockId", "Status", "LockTime", "ErrorMessage") VALUES ($1, $2, 2, \'\', $3, $4, 0, null, null);`,
     [uuidv4(), amount, publicKey, blockNumber]);
 }
 
@@ -120,7 +123,7 @@ async function setOutgoingKusamaTransactionStatus(id, status, error = "OK") {
   const conn = await getDbConnection();
 
   // Get one non-processed Kusama transaction
-  await conn.query(`UPDATE public."${outgoingTxTable}" SET "Status" = $1, "ErrorMessage" = $2 WHERE public."${outgoingTxTable}"."Id" = $3`, 
+  await conn.query(`UPDATE public."${outgoingTxTable}" SET "Status" = $1, "ErrorMessage" = $2 WHERE public."${outgoingTxTable}"."Id" = $3`,
     [status, error, id]);
 }
 
@@ -144,7 +147,7 @@ async function getOutgoingKusamaTransaction() {
     try {
       // Convert public key into address
       const address = encodeAddress(publicKey);
-      
+
       ksmTx.id = res.rows[0].Id;
       ksmTx.recipient = address;
       ksmTx.amount = res.rows[0].Value;
@@ -154,7 +157,7 @@ async function getOutgoingKusamaTransaction() {
       setOutgoingKusamaTransactionStatus(res.rows[0].Id, 2, e.toString());
       log(e, "ERROR");
     }
-    
+
   }
 
   return ksmTx;
@@ -181,7 +184,7 @@ async function scanKusamaBlock(api, blockNum) {
 
       if (events.includes('system.ExtrinsicSuccess')) {
         log(`Quote deposit in block ${blockNum} from ${ex.signer.toString()} amount ${args[1]}`, "RECEIVED");
-  
+
         // Register Quote Deposit (save to DB)
         const amount = args[1];
         const address = ex.signer.toString();
@@ -193,7 +196,7 @@ async function scanKusamaBlock(api, blockNum) {
       else {
         log(`Quote deposit from ${ex.signer.toString()} amount ${args[1]}`, "FAILED");
       }
-  
+
     }
   });
 
@@ -205,7 +208,7 @@ function getTransactionStatus(events, status) {
   }
   if (status.isBroadcast) {
     return "NotReady";
-  } 
+  }
   if (status.isInBlock || status.isFinalized) {
     if(events.filter(e => e.event.data.method === 'ExtrinsicFailed').length > 0) {
       return "Fail";
