@@ -17,8 +17,6 @@ const {
   decodeSearchKeywords
 } = require('./token-decoder');
 
-var BigNumber = require('bignumber.js');
-BigNumber.config({ DECIMAL_PLACES: 12, ROUNDING_MODE: BigNumber.ROUND_DOWN, decimalSeparator: '.' });
 const CancellationToken = require('./cancellation-token');
 
 const { Client } = require('pg');
@@ -72,15 +70,14 @@ async function getLastHandledUniqueBlock(uniqueClient) {
   const conn = await getDbConnection();
   const selectLastHandledUniqueBlockSql = `SELECT * FROM public."${uniqueBlocksTable}" ORDER BY public."${uniqueBlocksTable}"."BlockNumber" DESC LIMIT 1;`;
   const res = await conn.query(selectLastHandledUniqueBlockSql);
-  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : await getAndStoreStartingBlock(api);
+  const lastBlock = (res.rows.length > 0) ? res.rows[0].BlockNumber : await getAndStoreStartingBlock(uniqueClient);
   return lastBlock;
 }
 
-async function getAndStoreStartingBlock(api) {
+async function getAndStoreStartingBlock(uniqueClient) {
   let startingBlock;
   if('current'.localeCompare(config.startFromBlock, undefined, {sensitivity: 'accent'}) === 0) {
-    const head = await api.rpc.chain.getHeader();
-    startingBlock = head.number.toNumber();
+    startingBlock = await uniqueClient.currentBlockNumber();
   } else {
     startingBlock = parseInt(config.startFromBlock);
   }
@@ -315,7 +312,7 @@ async function scanNftBlock(uniqueClient, blockNum) {
           break;
         }
         case EXTRINSIC_TYPE_ASK_CONTRACT_CALL: {
-          await handleAskCall(ex, parsedExtrinsic, blockNum, blockHash);
+          await handleAskCall(ex, parsedExtrinsic, blockNum, blockHash, uniqueClient);
           break;
         }
         case EXTRINSIC_TYPE_BUY_CONTRACT_CALL: {
@@ -351,7 +348,7 @@ async function handleIncomintNftTx(tx, blockNum) {
   await addIncomingNFTTransaction(address, collectionId, tokenId, blockNum);
 }
 
-async function handleAskCall(ex, askTx, blockNum, blockHash){
+async function handleAskCall(ex, askTx, blockNum, blockHash, uniqueClient){
   log(`======== Ask Call`);
   const {
     collectionId,
@@ -361,14 +358,12 @@ async function handleAskCall(ex, askTx, blockNum, blockHash){
   } = askTx;
 
   log(`${ex.signer.toString()} listed ${collectionId}-${tokenId} in block ${blockNum} hash: ${blockHash} for ${quoteId}-${price}`);
-  const [collection, token] = await Promise.all([api.query.nft.collectionById(collectionId), api.query.nft.nftItemList(collectionId, tokenId)]);
+  const [collection, token] = await Promise.all([uniqueClient.collectionById(collectionId), uniqueClient.nftItemList(collectionId, tokenId)]);
 
   const tokenMeta = decodeTokenMeta(collection, token) || {};
   const tokenSearchKeywords = decodeSearchKeywords(collection, token, tokenId) || [];
 
   await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price, tokenMeta, tokenSearchKeywords);
-
-  await addOffer(ex.signer.toString(), collectionId, tokenId, quoteId, price);
 }
 
 async function handleBuyCall(uniqueClient, buyTx) {
@@ -438,13 +433,11 @@ async function handleWithdrawCall(withdrawTx) {
 }
 
 function onNewBlock(header) {
-  bestBlockNumber = header.number;
+  bestBlockNumber = header.number.toNumber();
   cancelDelay();
 }
 
-async function handleUnique() {
-  const uniqueClient = await createUniqueClient(config);
-
+async function handleUnique(uniqueClient) {
   await uniqueClient.subscribeToBlocks(onNewBlock);
 
   // Work indefinitely
@@ -453,7 +446,7 @@ async function handleUnique() {
     // 1. Catch up with blocks
     while (true) {
       // Get last processed block
-      let blockNum = parseInt(await getLastHandledUniqueBlock(api)) + 1;
+      let blockNum = parseInt(await getLastHandledUniqueBlock(uniqueClient)) + 1;
 
       if (blockNum <= bestBlockNumber) {
         await tasksQueue.enqueue(async () => {
@@ -548,12 +541,11 @@ async function migrated(migrationId) {
   }
 }
 
-async function setMetadataForAllOffers() {
+async function setMetadataForAllOffers(uniqueClient) {
   const conn = await getDbConnection();
   const offers = await conn.query(`SELECT "Id", "CreationDate", "CollectionId", "TokenId"	FROM public."Offer";`)
-  const api = await connect(config);
   for(let offer of offers.rows) {
-    const [collection, token] = await Promise.all([api.query.nft.collectionById(+offer.CollectionId), api.query.nft.nftItemList(+offer.CollectionId, +offer.TokenId)]);
+    const [collection, token] = await Promise.all([uniqueClient.collectionById(+offer.CollectionId), uniqueClient.nftItemList(+offer.CollectionId, +offer.TokenId)]);
     const metadata = decodeTokenMeta(collection, token);
     if(metadata) {
       await conn.query(`UPDATE public."Offer"
@@ -563,13 +555,12 @@ async function setMetadataForAllOffers() {
   }
 }
 
-async function createTestOffers() {
-  const api = await connect(config);
+async function createTestOffers(uniqueClient) {
   const keyring = new Keyring({ type: 'sr25519' });
   const admin = keyring.addFromUri('//Bob');
   adminAddress = admin.address.toString();
   for(let i = 1; i < 200; i++) {
-    const [collection, token] = await Promise.all([api.query.nft.collectionById(25), api.query.nft.nftItemList(25, i)]);
+    const [collection, token] = await Promise.all([uniqueClient.collectionById(25), uniqueClient.nftItemList(25, i)]);
     const metadata = decodeTokenMeta(collection, token);
     const textSearchKeywords = decodeSearchKeywords(collection, token, i.toString());
     if(metadata) {
@@ -577,7 +568,7 @@ async function createTestOffers() {
     }
   }
   for(let i = 1; i < 200; i++) {
-    const [collection, token] = await Promise.all([api.query.nft.collectionById(23), api.query.nft.nftItemList(23, i)]);
+    const [collection, token] = await Promise.all([uniqueClient.collectionById(23), uniqueClient.nftItemList(23, i)]);
     const metadata = decodeTokenMeta(collection, token);
     const textSearchKeywords = decodeSearchKeywords(collection, token, i.toString());
     if(metadata) {
@@ -585,7 +576,7 @@ async function createTestOffers() {
     }
   }
   for(let i = 1; i < 200; i++) {
-    const [collection, token] = await Promise.all([api.query.nft.collectionById(112), api.query.nft.nftItemList(112, i)]);
+    const [collection, token] = await Promise.all([uniqueClient.collectionById(112), uniqueClient.nftItemList(112, i)]);
     const metadata = decodeTokenMeta(collection, token);
     const textSearchKeywords = decodeSearchKeywords(collection, token, i.toString());
     if(metadata) {
@@ -594,12 +585,11 @@ async function createTestOffers() {
   }
 }
 
-async function setTextSearchForAllOffers() {
+async function setTextSearchForAllOffers(uniqueClient) {
   const conn = await getDbConnection();
   const offers = await conn.query(`SELECT DISTINCT "CollectionId", "TokenId" FROM public."Offer";`)
-  const api = await connect(config);
   for(let offer of offers.rows) {
-    const [collection, token] = await Promise.all([api.query.nft.collectionById(+offer.CollectionId), api.query.nft.nftItemList(+offer.CollectionId, +offer.TokenId)]);
+    const [collection, token] = await Promise.all([uniqueClient.collectionById(+offer.CollectionId), uniqueClient.nftItemList(+offer.CollectionId, +offer.TokenId)]);
     const textSearchKeywords = decodeSearchKeywords(collection, token, offer.TokenId.toString());
     await saveSearchKeywords(conn, +offer.CollectionId, +offer.TokenId, textSearchKeywords);
   }
@@ -611,6 +601,8 @@ async function truncateTextSearch() {
 }
 
 async function main() {
+  const uniqueClient = await createUniqueClient(config);
+
   log(`config.wsEndpoint: ${config.marketContractAddress}`);
   log(`config.marketContractAddress: ${config.marketContractAddress}`);
   const [isMetadataMigrated, isTextSearchMigrated, isAddTokenPrefixAndIdMigrated, isFixedTokensSearchIndexing] =
@@ -625,10 +617,10 @@ async function main() {
   if(!isTextSearchMigrated || !isAddTokenPrefixAndIdMigrated || !isFixedTokensSearchIndexing)
   {
     await truncateTextSearch();
-    await setTextSearchForAllOffers();
+    await setTextSearchForAllOffers(uniqueClient);
   }
 
-  await handleUnique();
+  await handleUnique(uniqueClient);
 }
 
 

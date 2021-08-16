@@ -1,7 +1,7 @@
 const defaultAdmins = `
 {
-  "contractAdmins": [],
-  "collectionAdmins": {
+  "contract": [],
+  "collection": {
     "25": []
   }
 }
@@ -10,9 +10,8 @@ const defaultAdmins = `
 const config = {
   wsEndpoint : process.env.wsEndpoint || 'wss://testnet2.uniquenetwork.io',
 
-  adminSeed : process.env.ADMIN_SEED || '//Alice',
-  admins : JSON.parse(process.env.ADMINS || defaultAdmins),
-  additionalAdminSeeds : parseArray(process.env.ADMIN_SEED, ',') || [],
+  escrowAdminSeed : process.env.ADMIN_SEED || '//Alice',
+  otherAdminSeeds : JSON.parse(process.env.OTHER_ADMINS_SEEDS || defaultAdmins),
   marketContractAddress : process.env.MatcherContractAddress || "5HGaEHg8PDhcEZGkfe6Tr9xmaroXjY5xX2c3NBdshoMkgZb6",
 
   whiteList : false,

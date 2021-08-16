@@ -39,7 +39,7 @@ class AdminPool {
   async rentCollectionAdmin(collectionId, callback) {
     await this.rentAdmin(this.admins.collectionAdmins[collectionId], collectionId.toString(), callback);
   }
-  
+
   async rentMainAdmin(callback) {
     await this.rentAdmin([], this.mainAdminGroupId, callback);
   }
@@ -53,17 +53,17 @@ class AdminPool {
         }
         else {
           this.returnAdminToGroupActions[admin.address] = [() => adminsGroup.push(admin)];
-          return useAdmin(admin, callback);
+          return this.useAdmin(admin, callback);
         }
       }
     }
 
     if(!this.isUsed[this.admins.escrowAdmin.address]) {
-      return useAdmin(this.admins.escrowAdmin, callback);
+      return this.useAdmin(this.admins.escrowAdmin, callback);
     }
 
     return new Promise((resolve) => this.requestPendingsByGroup[adminsGroupId] = this.pushOrInit(this.requestPendingsByGroup[adminsGroupId], resolve))
-      .then(() => this.rentAdmin(collection, adminsGroupId, callback));
+      .then(() => this.rentAdmin(adminsGroup, adminsGroupId, callback));
   }
 
   async useAdmin(admin, callback) {
@@ -92,8 +92,8 @@ class AdminPool {
   }
 
   releaseAdmin(admin) {
-    this.isAdminUsed[admin.address] = false;
-    this.returnAdminToGroup();
+    this.isUsed[admin.address] = false;
+    this.returnAdminToGroup(admin);
     const pendingRequest = this.findPendingRequest(admin);
     pendingRequest && pendingRequest();
   }

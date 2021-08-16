@@ -67,12 +67,12 @@ async function createUniqueClient(config) {
 
   const keyring = new Keyring({ type: 'sr25519' });
 
-  const escrowAdmin = adminFromSeed(config.adminSeed, keyring);
-  const contractAdmins = (config.admins.contractAdmins || []).map(a => adminFromSeed(a, keyring));
+  const escrowAdmin = adminFromSeed(config.escrowAdminSeed, keyring);
+  const contractAdmins = (config.otherAdminSeeds.contract || []).map(a => adminFromSeed(a, keyring));
   const collectionAdmins = {};
   const collectionAdminsAddresses = {};
-  for(let collectionId of Object.keys(config.collectionAdmins)) {
-    collectionAdmins[collectionId] = (config.collectionAdmins[collectionId] || []).map(a => adminFromSeed(a, keyring));
+  for(let collectionId of Object.keys(config.otherAdminSeeds.collection)) {
+    collectionAdmins[collectionId] = (config.otherAdminSeeds.collection[collectionId] || []).map(a => adminFromSeed(a, keyring));
     collectionAdminsAddresses[collectionId] = collectionAdmins[collectionId].map(a => a.address);
   }
 
@@ -180,10 +180,10 @@ class UniqueClient {
   async addWhiteList(userAddress) {
     if (!this.useWhiteLists) return;
 
-    const whiteListedBefore = (await api.query.nft.contractWhiteList(this.matcherAddress, userAddress)).toJSON();
+    const whiteListedBefore = (await this.api.query.nft.contractWhiteList(this.matcherAddress, userAddress)).toJSON();
     if (!whiteListedBefore) {
       try {
-        const addTx = api.tx.nft.addToContractWhiteList(this.matcherAddress, userAddress);
+        const addTx = this.api.tx.nft.addToContractWhiteList(this.matcherAddress, userAddress);
         await this.sendAsMainAdmin(addTx);
       } catch(error) {
         log(`Failed add to while list. Address: ${userAddress}`);
@@ -191,6 +191,19 @@ class UniqueClient {
     }
   }
 
+  collectionById(collectionId) {
+    return this.api.query.nft.collectionById(collectionId);
+  }
+
+  nftItemList(collectionId, tokenId) {
+    return this.api.query.nft.nftItemList(collectionId, tokenId);
+  }
+
+  async currentBlockNumber() {
+    const head = await this.api.rpc.chain.getHeader();
+    const block = head.number.toNumber();
+    return block;
+  }
 }
 
 module.exports = {
