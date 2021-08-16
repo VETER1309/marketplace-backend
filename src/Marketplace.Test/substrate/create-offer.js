@@ -51,7 +51,7 @@ async function createOffer(api, seller, admin, matcher, price, db) {
   let publicKey = Buffer.from(offer.SellerPublicKeyBytes, 'base64');
   const address = encodeAddress(publicKey);
   assert.strictEqual(address, seller.address.toString());
-  assert.strictEqual(offer.Price, price);
+  assert.strictEqual(BigInt(offer.Price), BigInt(price));
 
   return offer;
 }

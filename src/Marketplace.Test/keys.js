@@ -12,5 +12,7 @@ module.exports = {
   admin: () => key(config.adminSeed),
   seller: () => key(config.sellerSeed),
   buyer: () => key(config.buyerSeed),
+  seller2: () => key(config.seller2Seed),
+  buyer2: () => key(config.buyer2Seed),
   ksmAdmin: () => key(config.ksmAdminSeed)
 };

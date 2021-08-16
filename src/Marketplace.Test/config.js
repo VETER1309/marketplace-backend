@@ -8,6 +8,8 @@
   // Account whom sells token in tests
   sellerSeed: process.env.SELLER_SEED || '//Bob',
   buyerSeed: process.env.BUYER_SEED || '//Charlie',
+  seller2Seed: process.env.SELLER_2_SEED || '//Eve',
+  buyer2Seed: process.env.BUYER_2_SEED || '//Ferdie',
 
   dbHost : process.env.DB_HOST || 'localhost',
   dbPort : process.env.DB_PORT || 5432,

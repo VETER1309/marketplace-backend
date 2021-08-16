@@ -27,6 +27,15 @@ class Db {
     const offers = await this.dbClient.query(findOfferSql, [collectionId, tokenId]);
     return offers.rows;
   }
+
+  async findTrade(collectionId, tokenId) {
+    return (await this.dbClient.query(
+`SELECT t."Id", t."TradeDate", t."Buyer", t."OfferId"
+    FROM public."Trade" t
+    JOIN public."Offer" o ON o."Id" = t."OfferId"
+    WHERE o."CollectionId" = $1 AND o."TokenId" = $2;`,
+    [collectionId, tokenId])).rows;
+  }
 }
 
 module.exports = async function(config) {
