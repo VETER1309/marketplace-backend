@@ -1,5 +1,4 @@
 const { ApiPromise, WsProvider, Keyring } = require('@polkadot/api');
-const delay = require('delay');
 const config = require('./config');
 const { decodeAddress, encodeAddress } = require('@polkadot/util-crypto');
 const { v4: uuidv4 } = require('uuid');
@@ -8,6 +7,27 @@ const BigNumber = require('./big_number');
 
 const WITHDRAW_TYPE_UNUSED = 0;
 const WITHDRAW_TYPE_MATCHED = 1;
+
+const delay = function (ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+const rtt = {
+  DisputeStatementSet: {
+    candidateHash: 'CandidateHash',
+    session: 'SessionIndex',
+    statements: 'Vec<(DisputeStatement, ParaValidatorIndex, ValidatorSignature)>'
+  },
+  ValidDisputeStatementKind: {
+    _enum: {
+      Explicit: 'Null',
+      BackingSeconded: 'Hash',
+      BackingValid: 'Hash',
+      ApprovalChecking: 'Null'
+    }
+  }
+};
 
 
 const { Client } = require('pg');
@@ -45,7 +65,7 @@ async function getKusamaConnection() {
   const wsProvider = new WsProvider(config.wsEndpoint);
 
   // Create the API and wait until ready
-  const api = new ApiPromise({ provider: wsProvider });
+  const api = new ApiPromise({ provider: wsProvider, types: rtt });
 
   api.on('disconnected', async (value) => {
     log(`disconnected: ${value}`, "ERROR");
