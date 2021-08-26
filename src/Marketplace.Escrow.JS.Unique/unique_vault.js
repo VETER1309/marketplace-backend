@@ -49,6 +49,30 @@ function cancelDelay() {
   if (resolver) resolver();
 }
 
+function toHuman(obj) {
+  if(obj === undefined || obj === null) {
+    return undefined;
+  }
+
+  if('toHuman' in obj) {
+    return obj.toHuman();
+  }
+
+  if(Array.isArray(obj)) {
+    return obj.map(toHuman).join(', ');
+  }
+
+  if(typeof obj === 'object') {
+    for(let k of Object.keys(obj)) {
+      const h = toHuman(obj);
+      if(h) {
+        return h;
+      }
+    }
+  }
+
+  return undefined;
+}
 
 async function getDbConnection() {
   if (!dbClient) {
@@ -307,7 +331,9 @@ function getTransactionStatus(events, status) {
     return "NotReady";
   }
   if (status.isInBlock || status.isFinalized) {
-    if(events.filter(e => e.event.data.method === 'ExtrinsicFailed').length > 0) {
+    const errors = events.filter(e => e.event.data.method === 'ExtrinsicFailed');
+    if(errors.length > 0) {
+      log(`Transaction failed, ${toHuman(errors)}`, 'ERROR');
       return "Fail";
     }
     if(events.filter(e => e.event.data.method === 'ExtrinsicSuccess').length > 0) {
