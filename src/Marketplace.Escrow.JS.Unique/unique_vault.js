@@ -50,7 +50,6 @@ function cancelDelay() {
   if (resolver) resolver();
 }
 
-
 async function getDbConnection() {
   if (!dbClient) {
     dbClient = new Client({

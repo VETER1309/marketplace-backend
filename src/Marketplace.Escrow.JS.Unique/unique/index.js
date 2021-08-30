@@ -8,6 +8,32 @@ const AdminPool = require('./admin_pool');
 
 const quoteId = 2; // KSM
 
+
+function toHuman(obj) {
+  if(obj === undefined || obj === null) {
+    return undefined;
+  }
+
+  if('toHuman' in obj) {
+    return obj.toHuman();
+  }
+
+  if(Array.isArray(obj)) {
+    return obj.map(toHuman).join(', ');
+  }
+
+  if(typeof obj === 'object') {
+    for(let k of Object.keys(obj)) {
+      const h = toHuman(obj);
+      if(h) {
+        return h;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function getTransactionStatus(events, status) {
   if (status.isReady) {
     return "NotReady";
@@ -16,15 +42,15 @@ function getTransactionStatus(events, status) {
     return "NotReady";
   }
   if (status.isInBlock || status.isFinalized) {
-    if(events.filter(e => e.event.data.method === 'ExtrinsicFailed').length > 0) {
+    const errors = events.filter(e => e.event.data.method === 'ExtrinsicFailed');
+    if(errors.length > 0) {
+      log(`Transaction failed, ${toHuman(errors)}`, 'ERROR');
       return "Fail";
     }
     if(events.filter(e => e.event.data.method === 'ExtrinsicSuccess').length > 0) {
       return "Success";
     }
   }
-
-  return "Fail";
 }
 
 function sendTransactionAsync(sender, transaction, releaseSender) {
