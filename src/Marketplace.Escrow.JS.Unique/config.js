@@ -1,8 +1,18 @@
+const defaultAdmins = `
+{
+  "contract": [],
+  "collection": {
+    "25": []
+  }
+}
+`;
+
 const config = {
   wsEndpoint : process.env.wsEndpoint || 'wss://testnet2.uniquenetwork.io',
 
-  adminSeed : process.env.ADMIN_SEED || '//Alice',
-  marketContractAddress : process.env.MatcherContractAddress || "5EuBcZYh47ruAjrDweHvH4Fm5BwYkiFHNpTGKWAHkA3WFsEG",
+  escrowAdminSeed : process.env.ADMIN_SEED || '//Alice',
+  otherAdminSeeds : JSON.parse(process.env.OTHER_ADMINS_SEEDS || defaultAdmins),
+  marketContractAddress : process.env.MatcherContractAddress || "5HGaEHg8PDhcEZGkfe6Tr9xmaroXjY5xX2c3NBdshoMkgZb6",
 
   whiteList : false,
 
