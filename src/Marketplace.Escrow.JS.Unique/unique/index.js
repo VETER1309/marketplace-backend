@@ -1,12 +1,17 @@
 const { log, BigNumber } = require('../lib');
-const connect = require('./connect');
 const { Abi, ContractPromise } = require("@polkadot/api-contract");
 const contractAbi = require("../market_metadata.json");
 const { Keyring } = require('@polkadot/api');
 const {parseExtrinsic, ...types} = require('./parse_extrinsic');
 const AdminPool = require('./admin_pool');
+const { delay } = require('../lib/utility');
+const { ApiPromise, WsProvider } = require('@polkadot/api');
+const rtt = require("../runtime_types.json");
 
 const quoteId = 2; // KSM
+function connectDelay() {
+  return delay(6000);
+}
 
 
 function toHuman(obj) {
@@ -88,69 +93,132 @@ function adminFromSeed(seed, keyring) {
   return admin;
 }
 
-async function createUniqueClient(config) {
-  const api = await connect(config);
-
-  const keyring = new Keyring({ type: 'sr25519' });
-
-  const escrowAdmin = adminFromSeed(config.escrowAdminSeed, keyring);
-  const contractAdmins = (config.otherAdminSeeds.contract || []).map(a => adminFromSeed(a, keyring));
-  const collectionAdmins = {};
-  const collectionAdminsAddresses = {};
-  for(let collectionId of Object.keys(config.otherAdminSeeds.collection)) {
-    collectionAdmins[collectionId] = (config.otherAdminSeeds.collection[collectionId] || []).map(a => adminFromSeed(a, keyring));
-    collectionAdminsAddresses[collectionId] = collectionAdmins[collectionId].map(a => a.address);
-  }
-
-  const admins = {
-    escrowAdmin: escrowAdmin,
-    contractAdmins: contractAdmins,
-    collectionAdmins: collectionAdmins
-  }
-
-
-  const adminsPool = new AdminPool(admins);
-
-  const adminsAddresses = JSON.stringify({
-    escrowAdmin: escrowAdmin.address,
-    contractAdmins: contractAdmins.map(a => a.address),
-    collectionAdmins: collectionAdminsAddresses
-  }, null, '  ');
-
-  log(`Admins:
-${adminsAddresses}`);
-
-  return new UniqueClient(api, config, adminsPool, escrowAdmin.address.toString());
-}
-
 class UniqueClient {
-  constructor(api, config, adminsPool, mainAdminAddress) {
-    this.api = api;
-
-    this.adminsPool = adminsPool;
+  constructor(config) {
 
     this.abi = new Abi(contractAbi);
     this.matcherAddress = config.marketContractAddress;
     this.useWhiteLists = config.whiteList;
-    this.mainAdminAddress = mainAdminAddress;
+    this.createAdminsPool(config);
+    this.wsEndpoint = config.wsEndpoint;
+    this.subscriptions = [];
+  }
+
+  createAdminsPool(config) {
+    const keyring = new Keyring({ type: 'sr25519' });
+
+    const escrowAdmin = adminFromSeed(config.escrowAdminSeed, keyring);
+    const contractAdmins = (config.otherAdminSeeds.contract || []).map(a => adminFromSeed(a, keyring));
+    const collectionAdmins = {};
+    const collectionAdminsAddresses = {};
+    for(let collectionId of Object.keys(config.otherAdminSeeds.collection)) {
+      collectionAdmins[collectionId] = (config.otherAdminSeeds.collection[collectionId] || []).map(a => adminFromSeed(a, keyring));
+      collectionAdminsAddresses[collectionId] = collectionAdmins[collectionId].map(a => a.address);
+    }
+
+    const admins = {
+      escrowAdmin: escrowAdmin,
+      contractAdmins: contractAdmins,
+      collectionAdmins: collectionAdmins
+    }
+
+    this.adminsPool = new AdminPool(admins);
+
+    const adminsAddresses = JSON.stringify({
+      escrowAdmin: escrowAdmin.address,
+      contractAdmins: contractAdmins.map(a => a.address),
+      collectionAdmins: collectionAdminsAddresses
+    }, null, '  ');
+
+    log(`Admins:
+  ${adminsAddresses}`);
+
+    this.mainAdminAddress = escrowAdmin.address.toString();
+  }
+
+  async connect() {
+    try {
+      // Initialise the provider to connect to the node
+      log(`Connecting to ${this.wsEndpoint}`);
+      const wsProvider = new WsProvider(this.wsEndpoint, false);
+
+      // Create the API and wait until ready
+      this.api = new ApiPromise({
+        provider: wsProvider,
+        types: rtt,
+        throwOnConnect: false
+      });
+
+      await this.api.connect();
+      await this.api.isReadyOrError;
+
+      this.api.on('disconnected', async (value) => {
+        log(`disconnected from ${this.wsEndpoint}: ${value}`);
+        await connectDelay();
+        this.connect();
+      });
+
+      for(let s of this.subscriptions) {
+        s();
+      }
+
+    } catch(e) {
+      log(`Failed to connnect to ${this.wsEndpoint}`);
+      await connectDelay();
+      this.connect();
+    }
+  }
+
+  isDisconnectedError(error) {
+    return !this.api.isConnected;
+  }
+
+  async retryOnDisconnect(func) {
+    while(true) {
+      try {
+        return await func();
+      } catch(e) {
+        if(!this.isDisconnectedError(e)) {
+          throw e;
+        }
+      }
+    }
+  }
+
+  async ensureConnected() {
+    const isReady = () => Promise.race([this.api.isReadyOrError.then(r => true, err => false), connectDelay().then(r => false)]);
+
+    while(!this.api.isConnected && !await isReady()) {
+      await connectDelay();
+    }
   }
 
   async subscribeToBlocks(onNewBlock) {
+    await this.ensureConnected();
+    this.subscriptions.push(() => {
+      this.api.rpc.chain.subscribeNewHeads((header) => {
+        onNewBlock(header);
+      });
+    });
+
     await this.api.rpc.chain.subscribeNewHeads((header) => {
       onNewBlock(header);
     });
   }
 
   async readBlock(blockNumber) {
-    const blockHash = await this.api.rpc.chain.getBlockHash(blockNumber);
+    return this.retryOnDisconnect(async () => {
+      await this.ensureConnected();
+      const blockHash = await this.api.rpc.chain.getBlockHash(blockNumber);
 
-    // Memo: If it fails here, check custom types
-    const [signedBlock, events] = await Promise.all([this.api.rpc.chain.getBlock(blockHash), this.api.query.system.events.at(blockHash)]);
-    return {
-      signedBlock,
-      blockHash,
-      events
-    };
+      // Memo: If it fails here, check custom types
+      const [signedBlock, events] = await Promise.all([this.api.rpc.chain.getBlock(blockHash), this.api.query.system.events.at(blockHash)]);
+      return {
+        signedBlock,
+        blockHash,
+        events
+      };
+    });
   }
 
   sendAsContractAdmin(tx) {
@@ -166,6 +234,7 @@ class UniqueClient {
   }
 
   async sendNftTxAsync(recipient, collection_id, token_id, admin) {
+    await this.ensureConnected();
     await this.adminsPool.rentCollectionAdmin(collection_id, async (admin, isMainAdmin, release) => {
       const tx = isMainAdmin
         ? this.api.tx.nft.transfer(recipient, collection_id, token_id, 0)
@@ -176,6 +245,7 @@ class UniqueClient {
 
   async registerQuoteDepositAsync(depositorAddress, amount) {
     log(`${depositorAddress} deposited ${amount} in ${quoteId} currency`);
+    await this.ensureConnected();
 
     const contract = new ContractPromise(this.api, this.abi, this.matcherAddress);
 
@@ -189,6 +259,7 @@ class UniqueClient {
 
   async registerNftDepositAsync(depositorAddress, collection_id, token_id) {
     log(`${depositorAddress} deposited ${collection_id}, ${token_id}`);
+    await this.ensureConnected();
     const contract = new ContractPromise(this.api, this.abi, this.matcherAddress);
 
     const value = 0;
@@ -204,8 +275,11 @@ class UniqueClient {
   }
 
   async addWhiteList(userAddress) {
-    if (!this.useWhiteLists) return;
+    if (!this.useWhiteLists) {
+      return;
+    }
 
+    await this.ensureConnected();
     const whiteListedBefore = (await this.api.query.nft.contractWhiteList(this.matcherAddress, userAddress)).toJSON();
     if (!whiteListedBefore) {
       try {
@@ -217,22 +291,31 @@ class UniqueClient {
     }
   }
 
-  collectionById(collectionId) {
-    return this.api.query.nft.collectionById(collectionId);
+  async collectionById(collectionId) {
+    return this.retryOnDisconnect(async () => {
+      await this.ensureConnected();
+      return await this.api.query.nft.collectionById(collectionId);
+    });
   }
 
   nftItemList(collectionId, tokenId) {
-    return this.api.query.nft.nftItemList(collectionId, tokenId);
+    return this.retryOnDisconnect(async() => {
+      await this.ensureConnected();
+      return await this.api.query.nft.nftItemList(collectionId, tokenId);
+    })
   }
 
   async currentBlockNumber() {
-    const head = await this.api.rpc.chain.getHeader();
-    const block = head.number.toNumber();
-    return block;
+    return this.retryOnDisconnect(async() => {
+      await this.ensureConnected();
+      const head = await this.api.rpc.chain.getHeader();
+      const block = head.number.toNumber();
+      return block;
+    });
   }
 }
 
 module.exports = {
-  createUniqueClient,
+  UniqueClient,
   ...types
 };

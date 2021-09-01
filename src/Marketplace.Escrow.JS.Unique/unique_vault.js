@@ -3,7 +3,7 @@ const { decodeAddress, encodeAddress } = require('@polkadot/util-crypto');
 const config = require('./config');
 const { v4: uuidv4 } = require('uuid');
 const { log, BigNumber } = require('./lib');
-const {createUniqueClient,
+const {UniqueClient,
   EXTRINSIC_TYPE_ADMIN_RECEIVED_TOKEN,
   EXTRINSIC_TYPE_ASK_CONTRACT_CALL,
   EXTRINSIC_TYPE_BUY_CONTRACT_CALL,
@@ -16,6 +16,7 @@ const {
   decodeTokenMeta,
   decodeSearchKeywords
 } = require('./token-decoder');
+const {waitReady} = require('@polkadot/wasm-crypto');
 
 const CancellationToken = require('./cancellation-token');
 
@@ -600,7 +601,9 @@ async function truncateTextSearch() {
 }
 
 async function main() {
-  const uniqueClient = await createUniqueClient(config);
+  await waitReady();
+  const uniqueClient = new UniqueClient(config);
+  uniqueClient.connect().catch(() => {});
 
   log(`config.wsEndpoint: ${config.marketContractAddress}`);
   log(`config.marketContractAddress: ${config.marketContractAddress}`);
