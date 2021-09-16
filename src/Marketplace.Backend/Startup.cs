@@ -60,6 +60,7 @@ namespace Marketplace.Backend
             services.AddScoped<ITradeService, TradeService>();
             services.AddScoped<IOnHoldService, OnHoldService>();
             services.AddSingleton<Configuration>(Configuration);
+            services.AddCors(options => options.AddDefaultPolicy(builder => builder.AllowAnyOrigin()));
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -71,6 +72,8 @@ namespace Marketplace.Backend
                 app.UseSwagger();
                 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Marketplace.Backend v1"));
             }
+
+            app.UseCors();
 
             app.UseHttpsRedirection();
 
