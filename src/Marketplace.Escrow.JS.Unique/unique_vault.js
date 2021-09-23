@@ -468,7 +468,6 @@ async function handleUnique(uniqueClient) {
         return;
       }
     }
-    await tasksQueue.waitAllTasks();
 
     // Handle queued NFT deposits
     const nftTxs = await getIncomingNFTTransactions();
@@ -490,7 +489,6 @@ async function handleUnique(uniqueClient) {
         return;
       }
     }
-    await tasksQueue.waitAllTasks();
 
     // Handle queued KSM deposits
     const ksmTxs = await getIncomingKusamaTransactions();
@@ -515,7 +513,6 @@ async function handleUnique(uniqueClient) {
         return;
       }
     }
-    await tasksQueue.waitAllTasks();
 
     await delay(6000);
   }
