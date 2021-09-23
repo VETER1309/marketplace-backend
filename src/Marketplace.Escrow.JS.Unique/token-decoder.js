@@ -1,6 +1,6 @@
 const protobuf = require('protobufjs')
 const { hexToU8a } = require('@polkadot/util');
-const hexToString = require('./lib/hex-to-string');
+const hexToString = require('./lib/hexToString');
 const isNullOrWhitespace = require('./lib/is-null-or-whitespace');
 
 function decodeMetaType(collection) {
