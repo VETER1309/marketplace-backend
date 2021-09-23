@@ -7,6 +7,7 @@ const AdminPool = require('./admin_pool');
 const { delay } = require('../lib/utility');
 const { ApiPromise, WsProvider } = require('@polkadot/api');
 const rtt = require("../runtime_types.json");
+const { v4: uuidv4 } = require('uuid');
 
 const quoteId = 2; // KSM
 function connectDelay() {
@@ -135,40 +136,56 @@ class UniqueClient {
   }
 
   async connect() {
-    try {
-      // Initialise the provider to connect to the node
-      log(`Connecting to ${this.wsEndpoint}`);
-      const wsProvider = new WsProvider(this.wsEndpoint, false);
+    const timeoutResult = uuidv4();
+    const raceResult = await Promise.race(async () => {
+      try {
+        // Initialise the provider to connect to the node
+        log(`Connecting to ${this.wsEndpoint}`);
+        const wsProvider = new WsProvider(this.wsEndpoint, false);
+        // Create the API and wait until ready
+        const api = new ApiPromise({
+          provider: wsProvider,
+          types: rtt,
+          throwOnConnect: false
+        });
 
-      // Create the API and wait until ready
-      this.api = new ApiPromise({
-        provider: wsProvider,
-        types: rtt,
-        throwOnConnect: false
-      });
+        this.api = api;
 
-      await this.api.connect();
-      await this.api.isReadyOrError;
+        await this.api.connect();
+        await this.api.isReadyOrError;
 
-      this.api.on('disconnected', async (value) => {
-        log(`disconnected from ${this.wsEndpoint}: ${value}`);
-        await connectDelay();
-        this.connect();
-      });
+        this.api.on('disconnected', async (value) => {
+          if(this.api === api) {
+            log(`disconnected from ${this.wsEndpoint}: ${value}`);
+            await connectDelay();
+            this.connect();
+          }
+        });
 
-      for(let s of this.subscriptions) {
-        s();
+        for(let s of this.subscriptions) {
+          s();
+        }
+
+      } catch(e) {
+        if(this.api === api) {
+          log(`Failed to connnect to ${this.wsEndpoint}`);
+          await connectDelay();
+          this.connect();
+        }
       }
+    }, async () => {
+      await delay(30000);
+      return timeoutResult;
+    });
 
-    } catch(e) {
-      log(`Failed to connnect to ${this.wsEndpoint}`);
-      await connectDelay();
+    if(raceResult === timeoutResult) {
+      log(`Failed to connect within 30 seconds timeout, retrying.`);
       this.connect();
     }
   }
 
   isDisconnectedError(error) {
-    return !this.api.isConnected;
+    return !this.api.isConnected || (error.message??'').includes('WebSocket is not connected');
   }
 
   async retryOnDisconnect(func) {
