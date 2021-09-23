@@ -63,23 +63,25 @@ function sendTransactionAsync(sender, transaction, releaseSender) {
   return new Promise(async (resolve, reject) => {
     try {
       let unsub = await transaction.signAndSend(sender, ({ events = [], status }) => {
+        if(statusNotifications >= 1) {
+          releaseSender && releaseSender();
+        }
+        statusNotifications++;
+
         const transactionStatus = getTransactionStatus(events, status);
 
         if (transactionStatus === "Success") {
           log(`Transaction successful`);
-          releaseSender && releaseSender();
           resolve(events);
           unsub();
         } else if (transactionStatus === "Fail") {
           log(`Something went wrong with transaction. Status: ${status}`);
-          releaseSender && releaseSender();
           reject(events);
           unsub();
         }
       });
     } catch (e) {
       log('Error: ' + e.toString(), "ERROR");
-      releaseSender && releaseSender();
       reject(e);
     }
   });
